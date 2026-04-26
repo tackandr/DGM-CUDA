@@ -9,6 +9,7 @@ discretisation on a reference element [-1, 1]:
     GradVandermonde1D -- Gradient (derivative) of the Vandermonde matrix
     DMatrix1D         -- Nodal differentiation matrix
     Jacobian          -- Mapping Jacobian from reference to physical element
+    Lift1D            -- Lift operator for boundary flux integration
 """
 
 import numpy as np
@@ -96,7 +97,7 @@ def GradVandermonde1D(N, r):
     return Vr
 
 
-def DMatrix1D(N, r):
+def DMatrix1D(N, r, V):
     """Return the nodal differentiation matrix for the Nth order reference element.
 
     Computes D = Vr * V^{-1}, where Vr is the gradient Vandermonde matrix and
@@ -117,7 +118,7 @@ def DMatrix1D(N, r):
     D : ndarray, shape (N+1, N+1)
         Differentiation matrix.
     """
-    return np.matmul(GradVandermonde1D(N, r), LA.inv(Vandermonde1D(N,r))).transpose()
+    return np.matmul(GradVandermonde1D(N, r), LA.inv(V))
 
 
 def Jacobian(x, Dr):
@@ -139,3 +140,30 @@ def Jacobian(x, Dr):
         Jacobian dx/dr evaluated at each node.
     """
     return np.matmul(Dr, x)
+
+
+def Lift1D(N, V):
+    """Return the lift operator for boundary flux integration on the reference element.
+
+    Constructs the (N+1)×2 surface-to-volume lift matrix LIFT = V @ V^T @ Emat,
+    where Emat extracts the two boundary nodes (r=-1 and r=+1) of the element.
+    Applied to a vector of two boundary numerical fluxes, LIFT distributes them
+    back onto the interior degrees of freedom, which is required when assembling
+    the DG right-hand side.
+
+    Parameters
+    ----------
+    N : int
+        Polynomial order.
+    V : ndarray, shape (N+1, N+1)
+        Vandermonde matrix (e.g. from Vandermonde1D(N, r)).
+
+    Returns
+    -------
+    LIFT : ndarray, shape (N+1, 2)
+        Lift operator mapping 2 boundary flux values to N+1 nodal residuals.
+    """
+    Emat = np.zeros([N + 1, 2])
+    Emat[0, 0] = 1.0
+    Emat[N, 1] = 1.0
+    return np.matmul(V, np.matmul(V.T, Emat))

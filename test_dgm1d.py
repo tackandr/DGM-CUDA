@@ -8,6 +8,7 @@ from dgm1d import (
     DMatrix1D,
     GradVandermonde1D,
     Jacobian,
+    Lift1D,
     Vandermonde1D,
     legendreGL,
 )
@@ -210,3 +211,54 @@ class TestJacobian:
         D = DMatrix1D(N, r, V)
         J = Jacobian(r, D)
         assert J.shape == r.shape
+
+
+# ---------------------------------------------------------------------------
+# Lift1D
+# ---------------------------------------------------------------------------
+
+class TestLift1D:
+    def test_shape(self):
+        """LIFT has shape (N+1, 2)."""
+        for N in range(1, 7):
+            r = legendreGL(N)
+            V = Vandermonde1D(N, r)
+            LIFT = Lift1D(N, V)
+            assert LIFT.shape == (N + 1, 2)
+
+    def test_left_boundary_column(self):
+        """First column of LIFT (left boundary) reconstructs the left endpoint basis."""
+        for N in range(1, 6):
+            r = legendreGL(N)
+            V = Vandermonde1D(N, r)
+            LIFT = Lift1D(N, V)
+            # First col of Emat is unit vector with 1 at index 0
+            Emat_col0 = np.zeros(N + 1)
+            Emat_col0[0] = 1.0
+            expected = V @ (V.T @ Emat_col0)
+            np.testing.assert_allclose(LIFT[:, 0], expected, atol=1e-14)
+
+    def test_right_boundary_column(self):
+        """Second column of LIFT (right boundary) reconstructs the right endpoint basis."""
+        for N in range(1, 6):
+            r = legendreGL(N)
+            V = Vandermonde1D(N, r)
+            LIFT = Lift1D(N, V)
+            Emat_col1 = np.zeros(N + 1)
+            Emat_col1[N] = 1.0
+            expected = V @ (V.T @ Emat_col1)
+            np.testing.assert_allclose(LIFT[:, 1], expected, atol=1e-14)
+
+    def test_emat_structure(self):
+        """Emat has 1 at [0,0] and [N,1], zeros elsewhere — verified via LIFT columns."""
+        N = 3
+        r = legendreGL(N)
+        V = Vandermonde1D(N, r)
+        LIFT = Lift1D(N, V)
+        # Reconstruct Emat from LIFT: Emat = inv(V @ V^T) @ LIFT is hard;
+        # instead verify LIFT = V @ V^T @ Emat directly.
+        Emat = np.zeros([N + 1, 2])
+        Emat[0, 0] = 1.0
+        Emat[N, 1] = 1.0
+        expected = V @ (V.T @ Emat)
+        np.testing.assert_allclose(LIFT, expected, atol=1e-14)
