@@ -96,7 +96,7 @@ def GradVandermonde1D(N, r):
     return Vr
 
 
-def DMatrix1D(N, r, V):
+def DMatrix1D(N, r):
     """Return the nodal differentiation matrix for the Nth order reference element.
 
     Computes D = Vr * V^{-1}, where Vr is the gradient Vandermonde matrix and
@@ -117,7 +117,7 @@ def DMatrix1D(N, r, V):
     D : ndarray, shape (N+1, N+1)
         Differentiation matrix.
     """
-    return np.matmul(GradVandermonde1D(N, r), LA.inv(V))
+    return np.matmul(GradVandermonde1D(N, r), LA.inv(Vandermonde1D(N,r))).transpose()
 
 
 def Jacobian(x, Dr):
