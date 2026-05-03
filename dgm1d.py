@@ -116,7 +116,7 @@ def DMatrix1D(N, r):
     D : ndarray, shape (N+1, N+1)
         Differentiation matrix.
     """
-    return np.matmul(GradVandermonde1D(N, r), LA.inv(Vandermonde1D(N,r)))
+    return np.matmul(GradVandermonde1D(N, r), LA.inv(Vandermonde1D(N,r))).T
 
 
 def Jacobian(x, Dr):
