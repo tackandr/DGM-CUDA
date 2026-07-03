@@ -292,7 +292,10 @@ class TestSimulate:
         # Use element-width weighting: each element contributes h/(N+1) per node
         h = 2.0 / M
         mass_final = np.sum(u) * h / (N + 1)
-        assert abs(mass_final - mass_init) < 0.05
+        # Tolerance: 5 % of the domain length — DG with 10 elements and N=3
+        # gives sub-percent conservation; 5 % provides generous headroom.
+        _MASS_ATOL = 0.05
+        assert abs(mass_final - mass_init) < _MASS_ATOL
 
     def test_different_polynomial_orders(self):
         """simulate runs without errors for N = 1, 2, 3, 4."""

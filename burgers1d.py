@@ -321,8 +321,10 @@ def simulate(M, N, t_final, cfl=0.5, x_left=0.0, x_right=2.0, u_init=None):
     u = u_init(x).astype(float)
 
     t = 0.0
+    # Small floor prevents division by zero when u is identically zero
+    _MIN_SPEED = 1e-14
     while t < t_final:
-        max_speed = np.max(np.abs(u)) + 1e-14
+        max_speed = np.max(np.abs(u)) + _MIN_SPEED
         dt = cfl * h / (max_speed * (N + 1) ** 2)
         dt = min(dt, t_final - t)
         if dt <= 0.0:
