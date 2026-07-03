@@ -128,7 +128,7 @@ class TestDMatrix1D:
     def _setup(self, N):
         r = legendreGL(N)
         V = Vandermonde1D(N, r)
-        D = DMatrix1D(N, r, V)
+        D = DMatrix1D(N, r)
         return r, V, D
 
     def test_shape(self):
@@ -186,7 +186,7 @@ class TestJacobian:
         for N in range(1, 6):
             r = legendreGL(N)
             V = Vandermonde1D(N, r)
-            D = DMatrix1D(N, r, V)
+            D = DMatrix1D(N, r)
             a, b = -1.0, 3.0
             # Physical nodes: linear map from [-1,1] to [a,b]
             x = 0.5 * (b - a) * r + 0.5 * (a + b)
@@ -199,7 +199,7 @@ class TestJacobian:
         for N in range(1, 6):
             r = legendreGL(N)
             V = Vandermonde1D(N, r)
-            D = DMatrix1D(N, r, V)
+            D = DMatrix1D(N, r)
             J = Jacobian(r, D)
             np.testing.assert_allclose(J, 1.0, atol=1e-12)
 
@@ -208,7 +208,7 @@ class TestJacobian:
         N = 4
         r = legendreGL(N)
         V = Vandermonde1D(N, r)
-        D = DMatrix1D(N, r, V)
+        D = DMatrix1D(N, r)
         J = Jacobian(r, D)
         assert J.shape == r.shape
 
