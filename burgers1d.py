@@ -308,6 +308,8 @@ def limit_solution(u, J, tvb_constant=50.0):
     # whose boundary deviations scale like O(dx^2) on a uniform mesh.
     tvb_threshold = tvb_constant * dx * dx
 
+    # Each edge slope is limited against the neighbour-based centred slope while
+    # preserving the classic three-argument minmod structure used in DG limiters.
     limited_left = _tvb_minmod(left_slope, left_slope, centered_slope, tvb_threshold)
     limited_right = _tvb_minmod(right_slope, right_slope, centered_slope, tvb_threshold)
     limited_slope = 0.5 * (limited_left + limited_right)
@@ -371,7 +373,7 @@ def burgers_rhs(u, D, LIFT, J, EToE, EToF):
 
     left_neigh = EToE[:, 0]
     right_neigh = EToE[:, 1]
-    boundary[:, 0] = -numerical_flux(u[left_neigh, N], u[:, 0])
+    boundary[:, 0] = -numerical_flux(u[left_neigh, N], u[:, 0])  # exterior-left, then interior-left
     boundary[:, N] = numerical_flux(u[:, N], u[right_neigh, 0])
 
     residual = flux @ stiffness - boundary

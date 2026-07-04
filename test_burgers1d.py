@@ -19,8 +19,8 @@ from dgm1d import Vandermonde1D, legendreGL
 
 def _mean_weights(N, r):
     """Return exact nodal weights for the reference-element cell average."""
-    # Match the solver's exact-integration choice so degree-2N nonlinear states
-    # are integrated exactly when forming per-element means.
+    # Match burgers1d._quadrature_order so degree-2N nonlinear states are still
+    # integrated exactly when forming per-element means in the tests.
     q_nodes, q_weights = np.polynomial.legendre.leggauss(2 * N + 3)
     V = Vandermonde1D(N, r)
     V_inv = np.linalg.solve(V, np.eye(V.shape[0]))
@@ -336,8 +336,8 @@ class TestSimulate:
         h = 2.0 / M
         _, r = build_mesh(M, N)
         mass_final = h * np.sum(u @ _mean_weights(N, r))
-        # Tolerance: 5 % of the domain length — DG with 10 elements and N=3
-        # gives sub-percent conservation; 5 % provides generous headroom.
+        # Tolerance: 2.5 % of the domain length — DG with 10 elements and N=3
+        # gives sub-percent conservation; this still provides generous headroom.
         mass_atol = 0.05
         assert abs(mass_final - mass_init) < mass_atol
 
