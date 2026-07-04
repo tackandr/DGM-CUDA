@@ -179,6 +179,17 @@ def exact_sine_solution(x, t, tol=1e-13, max_iter=50):
 
     which is single-valued only before the first shock forms at t = 1 / pi.
     """
+    Parameters
+    ----------
+    x : array_like
+        Evaluation points.
+    t : float
+        Time at which to evaluate the pre-shock solution.
+    tol : float, optional
+        Newton-iteration stopping tolerance on the update size.
+    max_iter : int, optional
+        Maximum number of Newton iterations.
+    """
     if t < 0.0:
         raise ValueError("t must be non-negative")
     if t >= 1.0 / np.pi:
@@ -256,6 +267,21 @@ def limit_solution(u, J, tvb_constant=50.0):
     The limiter preserves the cell average and, when activated, replaces the
     local polynomial by a bounded linear profile built from limited edge slopes.
     The TVB threshold prevents clipping smooth extrema before the first shock.
+
+    Parameters
+    ----------
+    u : ndarray, shape (M, N+1)
+        Current nodal values.
+    J : array_like, shape (M,)
+        Per-element Jacobians, used to build the TVB threshold from the local
+        element width dx = 2J.
+    tvb_constant : float, optional
+        TVB constant controlling how aggressively smooth extrema are preserved.
+
+    Returns
+    -------
+    ndarray, shape (M, N+1)
+        Limited nodal values.
     """
     N = u.shape[1] - 1
     if N <= 1:

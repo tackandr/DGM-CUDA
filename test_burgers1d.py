@@ -17,6 +17,15 @@ from burgers1d import (
 from dgm1d import Vandermonde1D, legendreGL
 
 
+def _mean_weights(N, r):
+    """Return exact nodal weights for the reference-element cell average."""
+    q_nodes, q_weights = np.polynomial.legendre.leggauss(2 * N + 3)
+    V = Vandermonde1D(N, r)
+    V_inv = np.linalg.solve(V, np.eye(V.shape[0]))
+    interp = Vandermonde1D(N, q_nodes) @ V_inv
+    return 0.5 * (q_weights @ interp)
+
+
 # ---------------------------------------------------------------------------
 # build_mesh
 # ---------------------------------------------------------------------------
@@ -275,12 +284,7 @@ class TestLimiter:
         J = np.full(M, 0.5 * 2.0 / M)
         limited = limit_solution(u, J)
         assert np.all(np.isfinite(limited))
-
-        q_nodes, q_weights = np.polynomial.legendre.leggauss(2 * N + 3)
-        V = build_operators(N, r)[0]
-        V_inv = np.linalg.solve(V, np.eye(V.shape[0]))
-        interp = Vandermonde1D(N, q_nodes) @ V_inv
-        mean_weights = 0.5 * (q_weights @ interp)
+        mean_weights = _mean_weights(N, r)
         np.testing.assert_allclose(limited @ mean_weights, u @ mean_weights, atol=1e-12)
 
 
@@ -327,9 +331,9 @@ class TestSimulate:
         M, N = 10, 3
         mass_init = 0.0   # integral of sin(pi*x) over [0,2] = 0
         x, u, t = simulate(M, N, t_final=0.1)
-        # Use element-width weighting: each element contributes h/(N+1) per node
         h = 2.0 / M
-        mass_final = np.sum(u) * h / (N + 1)
+        _, r = build_mesh(M, N)
+        mass_final = h * np.sum(u @ _mean_weights(N, r))
         # Tolerance: 5 % of the domain length — DG with 10 elements and N=3
         # gives sub-percent conservation; 5 % provides generous headroom.
         _MASS_ATOL = 0.05
@@ -364,8 +368,11 @@ class TestSimulate:
     def test_stays_bounded_after_shock(self):
         """A post-shock run remains finite and avoids the long-time collapse."""
         x, u, t = simulate(40, 5, t_final=1.2)
+        POST_SHOCK_MAX_AMPLITUDE = 1.0
         assert np.all(np.isfinite(u))
-        assert np.max(np.abs(u)) < 1.0
+        # The limiter/upwind combination should keep the post-shock sine-wave run
+        # within the original [-1, 1] amplitude envelope.
+        assert np.max(np.abs(u)) < POST_SHOCK_MAX_AMPLITUDE
 
 
 class TestExactSineSolution:
