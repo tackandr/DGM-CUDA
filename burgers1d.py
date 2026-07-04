@@ -39,6 +39,19 @@ from dgm1d import (
     Lift1D,
 )
 
+# ---------------------------------------------------------------------------
+# Import shared limiter and flux primitives from library modules.
+# The public names (numerical_flux, limit_solution) are unchanged so that
+# existing code and tests that import from burgers1d continue to work.
+# ---------------------------------------------------------------------------
+from fluxes1d import burgers_godunov_flux as numerical_flux           # noqa: E402
+from limiters1d import (                                               # noqa: E402
+    minmod3 as _minmod3_lib,
+    tvb_minmod as _tvb_minmod_lib,
+    build_limiter_data as _build_limiter_data_lib,
+    limit_scalar as limit_solution,
+)
+
 
 # ---------------------------------------------------------------------------
 # Mesh and operator construction
@@ -137,39 +150,6 @@ def build_connectivity(M):
     return EToE, EToF
 
 
-# ---------------------------------------------------------------------------
-# Numerical flux
-# ---------------------------------------------------------------------------
-
-def numerical_flux(u_minus, u_plus):
-    """Godunov upwind numerical flux for Burgers' equation.
-
-    For the convex Burgers flux f(u) = u^2 / 2, the Godunov flux equals the
-    upwind state selected by the local Riemann problem:
-
-      * shocks (u- > u+) use the state indicated by the shock speed
-      * rarefactions (u- <= u+) use the left state if both states are positive,
-        the right state if both are negative, and zero when the fan straddles 0
-
-    Operates element-wise; inputs may be scalars or arrays of any shape.
-    """
-    u_minus = np.asarray(u_minus, dtype=float)
-    u_plus = np.asarray(u_plus, dtype=float)
-    flux_minus = 0.5 * u_minus**2
-    flux_plus = 0.5 * u_plus**2
-
-    shock = u_minus > u_plus
-    shock_speed = 0.5 * (u_minus + u_plus)
-    shock_flux = np.where(shock_speed >= 0.0, flux_minus, flux_plus)
-
-    rarefaction_flux = np.where(
-        u_plus <= 0.0,
-        flux_plus,
-        np.where(u_minus >= 0.0, flux_minus, 0.0),
-    )
-    return np.where(shock, shock_flux, rarefaction_flux)
-
-
 def exact_sine_solution(x, t, tol=1e-13, max_iter=50):
     """Return the analytical pre-shock Burgers solution for u(x,0)=sin(pi x).
 
@@ -240,87 +220,6 @@ def _build_weak_form_operators(N):
     inv_mass = np.linalg.solve(mass, np.eye(mass.shape[0]))
     stiffness = weighted_interp.T @ grad_interp
     return inv_mass, stiffness
-
-
-@lru_cache(maxsize=16)
-def _build_limiter_data(N):
-    """Return reference-node and cell-average data used by the limiter."""
-    r = legendreGL(N)
-    V = Vandermonde1D(N, r)
-    V_inv = np.linalg.solve(V, np.eye(V.shape[0]))
-
-    q_order = _quadrature_order(N)
-    q_nodes, q_weights = np.polynomial.legendre.leggauss(q_order)
-    Vq = Vandermonde1D(N, q_nodes)
-    interp = Vq @ V_inv
-    mean_weights = 0.5 * (q_weights @ interp)
-    return r, mean_weights
-
-
-def _minmod3(a, b, c):
-    """Return the minmod of three same-shaped arrays."""
-    same_sign = (np.sign(a) == np.sign(b)) & (np.sign(a) == np.sign(c))
-    magnitude = np.minimum(np.abs(a), np.minimum(np.abs(b), np.abs(c)))
-    return np.where(same_sign, np.sign(a) * magnitude, 0.0)
-
-
-def _tvb_minmod(a, b, c, tvb_threshold):
-    """Return the TVB minmod of three arrays."""
-    return np.where(np.abs(a) <= tvb_threshold, a, _minmod3(a, b, c))
-
-
-def limit_solution(u, J, tvb_constant=50.0):
-    """Apply a TVB minmod limiter to troubled elements.
-
-    The limiter preserves the cell average and, when activated, replaces the
-    local polynomial by a bounded linear profile built from limited edge slopes.
-    The TVB threshold prevents clipping smooth extrema before the first shock.
-
-    Parameters
-    ----------
-    u : ndarray, shape (M, N+1)
-        Current nodal values.
-    J : array_like, shape (M,)
-        Per-element Jacobians, used to build the TVB threshold from the local
-        element width dx = 2J.
-    tvb_constant : float, optional
-        TVB constant controlling how aggressively smooth extrema are preserved.
-
-    Returns
-    -------
-    ndarray, shape (M, N+1)
-        Limited nodal values.
-    """
-    N = u.shape[1] - 1
-    if N <= 1:
-        return u
-
-    r, mean_weights = _build_limiter_data(N)
-    cell_average = u @ mean_weights
-    avg_left = np.roll(cell_average, 1)
-    avg_right = np.roll(cell_average, -1)
-
-    left_slope = cell_average - u[:, 0]
-    right_slope = u[:, N] - cell_average
-    centered_slope = 0.5 * (avg_right - avg_left)
-    dx = 2.0 * np.asarray(J, dtype=float)
-    # The TVB limiter relaxes to the unlimited polynomial for smooth extrema,
-    # whose boundary deviations scale like O(dx^2) on a uniform mesh.
-    tvb_threshold = tvb_constant * dx * dx
-
-    # Each edge slope is limited against the neighbour-based centred slope while
-    # preserving the classic three-argument minmod structure used in DG limiters.
-    limited_left = _tvb_minmod(left_slope, left_slope, centered_slope, tvb_threshold)
-    limited_right = _tvb_minmod(right_slope, right_slope, centered_slope, tvb_threshold)
-    limited_slope = 0.5 * (limited_left + limited_right)
-
-    troubled = (np.abs(limited_left - left_slope) > 1e-12) | (np.abs(limited_right - right_slope) > 1e-12)
-    if not np.any(troubled):
-        return u
-
-    limited = u.copy()
-    limited[troubled] = cell_average[troubled, np.newaxis] + limited_slope[troubled, np.newaxis] * r[np.newaxis, :]
-    return limited
 
 
 # ---------------------------------------------------------------------------
