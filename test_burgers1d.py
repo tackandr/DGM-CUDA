@@ -9,11 +9,12 @@ from burgers1d import (
     build_operators,
     burgers_rhs,
     exact_sine_solution,
+    limit_solution,
     numerical_flux,
     rk4_step,
     simulate,
 )
-from dgm1d import legendreGL
+from dgm1d import Vandermonde1D, legendreGL
 
 
 # ---------------------------------------------------------------------------
@@ -121,15 +122,21 @@ class TestNumericalFlux:
         u = np.array([-2.0, 0.0, 1.5, 3.0])
         np.testing.assert_allclose(numerical_flux(u, u), 0.5 * u**2, atol=1e-14)
 
-    def test_lf_formula(self):
-        """LF flux equals (f(u-)+f(u+))/2 - alpha/2*(u+ - u-)."""
-        rng = np.random.default_rng(0)
-        u_m = rng.uniform(-3, 3, 50)
-        u_p = rng.uniform(-3, 3, 50)
-        f_star = numerical_flux(u_m, u_p)
-        alpha = np.maximum(np.abs(u_m), np.abs(u_p))
-        expected = 0.5 * (0.5 * u_m**2 + 0.5 * u_p**2) - 0.5 * alpha * (u_p - u_m)
-        np.testing.assert_allclose(f_star, expected, atol=1e-14)
+    def test_right_going_shock_uses_left_state(self):
+        """Positive-speed shocks use the left upwind state."""
+        assert numerical_flux(2.0, 1.0) == pytest.approx(2.0)
+
+    def test_left_going_shock_uses_right_state(self):
+        """Negative-speed shocks use the right upwind state."""
+        assert numerical_flux(-1.0, -2.0) == pytest.approx(2.0)
+
+    def test_rarefaction_through_zero_returns_zero_flux(self):
+        """A rarefaction fan spanning zero uses the sonic flux."""
+        assert numerical_flux(-1.0, 1.0) == pytest.approx(0.0)
+
+    def test_positive_rarefaction_uses_left_state(self):
+        """Positive rarefactions are upwinded from the left state."""
+        assert numerical_flux(0.5, 1.0) == pytest.approx(0.125)
 
     def test_scalar_inputs(self):
         """Works with scalar inputs."""
@@ -248,6 +255,36 @@ class TestRK4Step:
 
 
 # ---------------------------------------------------------------------------
+# limiter
+# ---------------------------------------------------------------------------
+
+class TestLimiter:
+    def test_preserves_constant_state(self):
+        """The limiter leaves constant states unchanged."""
+        M, N = 5, 4
+        u = np.full((M, N + 1), 1.25)
+        J = np.full(M, 0.2)
+        np.testing.assert_allclose(limit_solution(u, J), u, atol=1e-14)
+
+    def test_preserves_cell_averages(self):
+        """Limiting troubled cells preserves the per-element average."""
+        M, N = 4, 5
+        x, r = build_mesh(M, N)
+        u = np.sin(np.pi * x)
+        u[1] *= 4.0
+        J = np.full(M, 0.5 * 2.0 / M)
+        limited = limit_solution(u, J)
+        assert np.all(np.isfinite(limited))
+
+        q_nodes, q_weights = np.polynomial.legendre.leggauss(2 * N + 3)
+        V = build_operators(N, r)[0]
+        V_inv = np.linalg.solve(V, np.eye(V.shape[0]))
+        interp = Vandermonde1D(N, q_nodes) @ V_inv
+        mean_weights = 0.5 * (q_weights @ interp)
+        np.testing.assert_allclose(limited @ mean_weights, u @ mean_weights, atol=1e-12)
+
+
+# ---------------------------------------------------------------------------
 # simulate
 # ---------------------------------------------------------------------------
 
@@ -323,6 +360,12 @@ class TestSimulate:
         # current discretisation while remaining tight enough to catch the
         # interface blow-up regression that previously produced infinities.
         np.testing.assert_allclose(u, u_exact, atol=1.6e-2, rtol=2.0e-2)
+
+    def test_stays_bounded_after_shock(self):
+        """A post-shock run remains finite and avoids the long-time collapse."""
+        x, u, t = simulate(40, 5, t_final=1.2)
+        assert np.all(np.isfinite(u))
+        assert np.max(np.abs(u)) < 1.0
 
 
 class TestExactSineSolution:
