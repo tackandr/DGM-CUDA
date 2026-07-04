@@ -100,9 +100,9 @@ def GradVandermonde1D(N, r):
 def DMatrix1D(N, r):
     """Return the nodal differentiation matrix for the Nth order reference element.
 
-    Computes D = Vr * V^{-1}, where Vr is the gradient Vandermonde matrix and
-    V is the Vandermonde matrix.  Applying D to a vector of nodal values gives
-    the derivative of the interpolating polynomial at those nodes.
+    Computes the derivative operator from the gradient and value Vandermonde
+    matrices evaluated at the supplied nodes. Applying D to a vector of nodal
+    values gives the derivative of the interpolating polynomial at those nodes.
 
     Parameters
     ----------

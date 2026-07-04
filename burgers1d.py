@@ -226,26 +226,25 @@ def _build_weak_form_operators(N):
 def burgers_rhs(u, D, LIFT, J, EToE, EToF):
     """Compute the DG right-hand side for the inviscid 1D Burgers equation.
 
-    Uses the strong form on each element k:
+    Uses a weak-form discretisation on each element k:
 
-        J_k * du_k/dt = D @ f(u_k)
-                        - LIFT @ [n_left  * (F*_left  - f(u_k[0])),
-                                  n_right * (F*_right - f(u_k[N]))]
+        J_k * M * du_k/dt = S^T f(u_k) - [F*_left, 0, ..., 0, F*_right]
 
-    where f(u) = u^2/2, n_left = -1, n_right = +1 are outward normals.
-    Interface fluxes use a consistent left-right orientation so that the same
-    single-valued F* is seen by both elements sharing an interface (conservation
-    form).  The connectivity arrays EToE / EToF identify the neighboring element
-    and face for each face of each element.
+    where M is the reference-element mass matrix, S is the stiffness matrix and
+    f(u) = u^2/2. The reference operators are integrated with sufficiently high
+    Gauss-Legendre quadrature so the semi-discrete residual is not contaminated
+    by under-integrated nonlinear volume terms. Interface fluxes use a consistent
+    left-right orientation so that the same single-valued F* is seen by both
+    elements sharing an interface.
 
     Parameters
     ----------
     u : ndarray, shape (M, N+1)
         Current nodal values.
     D : ndarray, shape (N+1, N+1)
-        Reference-element differentiation matrix.
+        Reference-element differentiation matrix, used only to validate N.
     LIFT : ndarray, shape (N+1, 2)
-        Lift operator.
+        Reference-element lift operator, used only to validate N.
     J : ndarray, shape (M,)
         Per-element Jacobian (physical element width / 2).
     EToE : ndarray, shape (M, 2), int
