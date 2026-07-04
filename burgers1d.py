@@ -202,7 +202,7 @@ def _build_weak_form_operators(N):
     """Return exact reference-element weak-form operators for degree N."""
     r = legendreGL(N)
     V = Vandermonde1D(N, r)
-    V_inv = np.linalg.inv(V)
+    V_inv = np.linalg.solve(V, np.eye(V.shape[0]))
 
     q_order = max(2 * N + 3, 8)
     q_nodes, q_weights = np.polynomial.legendre.leggauss(q_order)
@@ -214,7 +214,7 @@ def _build_weak_form_operators(N):
     weighted_interp = q_weights[:, np.newaxis] * interp
 
     mass = interp.T @ weighted_interp
-    inv_mass = np.linalg.inv(mass)
+    inv_mass = np.linalg.solve(mass, np.eye(mass.shape[0]))
     stiffness = weighted_interp.T @ grad_interp
     return inv_mass, stiffness
 
@@ -235,7 +235,9 @@ def burgers_rhs(u, D, LIFT, J, EToE, EToF):
     Gauss-Legendre quadrature so the semi-discrete residual is not contaminated
     by under-integrated nonlinear volume terms. Interface fluxes use a consistent
     left-right orientation so that the same single-valued F* is seen by both
-    elements sharing an interface.
+    elements sharing an interface; the left boundary contribution carries a
+    minus sign because the weak-form boundary term is evaluated with the outward
+    normal on the left face.
 
     Parameters
     ----------
