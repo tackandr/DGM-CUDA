@@ -212,6 +212,14 @@ def exact_sine_solution(x, t, tol=1e-13, max_iter=50):
     raise RuntimeError("Newton iteration did not converge for the analytical sine-wave solution")
 
 
+def _quadrature_order(N):
+    """Return a quadrature order exact for the Burgers volume and mean terms."""
+    # For degree-N states, f(u)=u^2/2 reaches degree 2N and its weak-form volume
+    # term multiplies another degree-N basis polynomial derivative, so 2N+3
+    # points keep both the stiffness assembly and limiter averages exact.
+    return max(2 * N + 3, 8)
+
+
 @lru_cache(maxsize=16)
 def _build_weak_form_operators(N):
     """Return exact reference-element weak-form operators for degree N."""
@@ -219,7 +227,7 @@ def _build_weak_form_operators(N):
     V = Vandermonde1D(N, r)
     V_inv = np.linalg.solve(V, np.eye(V.shape[0]))
 
-    q_order = max(2 * N + 3, 8)
+    q_order = _quadrature_order(N)
     q_nodes, q_weights = np.polynomial.legendre.leggauss(q_order)
     Vq = Vandermonde1D(N, q_nodes)
     Vrq = GradVandermonde1D(N, q_nodes)
@@ -241,7 +249,7 @@ def _build_limiter_data(N):
     V = Vandermonde1D(N, r)
     V_inv = np.linalg.solve(V, np.eye(V.shape[0]))
 
-    q_order = max(2 * N + 3, 8)
+    q_order = _quadrature_order(N)
     q_nodes, q_weights = np.polynomial.legendre.leggauss(q_order)
     Vq = Vandermonde1D(N, q_nodes)
     interp = Vq @ V_inv
@@ -296,6 +304,8 @@ def limit_solution(u, J, tvb_constant=50.0):
     right_slope = u[:, N] - cell_average
     centered_slope = 0.5 * (avg_right - avg_left)
     dx = 2.0 * np.asarray(J, dtype=float)
+    # The TVB limiter relaxes to the unlimited polynomial for smooth extrema,
+    # whose boundary deviations scale like O(dx^2) on a uniform mesh.
     tvb_threshold = tvb_constant * dx * dx
 
     limited_left = _tvb_minmod(left_slope, left_slope, centered_slope, tvb_threshold)
