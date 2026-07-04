@@ -357,7 +357,7 @@ def euler_rhs(U, D, LIFT, J, EToE, EToF, gamma, flux_fn=None, bc_type="periodic"
 # Limiter
 # ---------------------------------------------------------------------------
 
-def limit_euler(U, J, gamma=1.4, tvb_constant=50.0):
+def limit_euler(U, J, gamma=1.4, tvb_constant=50.0, bc_type="periodic"):
     """Apply a TVB minmod limiter to the Euler conserved variables.
 
     Uses component-wise limiting: applies the scalar TVB limiter independently
@@ -378,13 +378,17 @@ def limit_euler(U, J, gamma=1.4, tvb_constant=50.0):
         Ratio of specific heats (unused; kept for API consistency).
     tvb_constant : float, optional
         TVB constant (default 50).
+    bc_type : {'periodic', 'transmissive'}, optional
+        Boundary condition type (default 'periodic').  For 'transmissive',
+        ghost cell averages at the domain boundaries equal the boundary
+        element averages so the limiter does not wrap across domain edges.
 
     Returns
     -------
     ndarray, shape (3, M, N+1)
         Limited nodal values.
     """
-    return np.stack([limit_scalar(U[v], J, tvb_constant) for v in range(3)])
+    return np.stack([limit_scalar(U[v], J, tvb_constant, bc_type) for v in range(3)])
 
 
 # ---------------------------------------------------------------------------
@@ -448,7 +452,7 @@ def rk4_step_euler(U, dt, D, LIFT, J, EToE, EToF, gamma, flux_fn=None, bc_type="
         return euler_rhs(V, D, LIFT, J, EToE, EToF, gamma, flux_fn, bc_type)
 
     def limit(V):
-        return limit_euler(V, J, gamma)
+        return limit_euler(V, J, gamma, bc_type=bc_type)
 
     U0 = limit(U)
     k1 = rhs(U0)

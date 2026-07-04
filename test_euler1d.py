@@ -306,3 +306,36 @@ class TestSodShockTube:
         assert abs(mass_f - mass0) / mass0 < 1e-3, (
             f"Mass not conserved: {abs(mass_f - mass0)/mass0:.2e}"
         )
+
+    def test_long_time_transmissive_bounded(self):
+        """Running past t=0.3 with transmissive BCs must remain bounded.
+
+        The shock exits the right boundary around t~0.29 s.  With the
+        periodic np.roll in the limiter the ghost-cell averages were wrong,
+        causing the limiter to flag element 0 as troubled and inject a large
+        spurious slope.  This test checks that the solution stays finite and
+        physically plausible after the shock has left the domain.
+        """
+        M, N = 80, 2
+        x, _ = build_mesh(M, N, 0.0, 1.0)
+        U0 = sod_ic(x, GAMMA)
+        _, mw = build_limiter_data(N)
+
+        x_c, U_out, t = simulate_euler(
+            M=M, N=N, t_final=0.4, gamma=GAMMA, cfl=0.3,
+            x_left=0.0, x_right=1.0, U_init=U0,
+            flux_fn=euler_roe_flux, bc_type="transmissive",
+        )
+        assert np.all(np.isfinite(U_out)), "Non-finite values after shock exits domain"
+
+        rho = U_out[0] @ mw
+        rhou = U_out[1] @ mw
+        E = U_out[2] @ mw
+        u_vel = rhou / np.maximum(rho, 1e-14)
+        p = (GAMMA - 1.0) * (E - 0.5 * rhou * u_vel)
+
+        assert np.all(rho > 0), f"Negative density after shock exit: min={rho.min()}"
+        assert np.all(p > 0), f"Negative pressure after shock exit: min={p.min()}"
+        # Density and pressure must stay within O(1) of initial data
+        assert rho.max() < 5.0, f"Density blowup after shock exit: max={rho.max()}"
+        assert p.max() < 5.0, f"Pressure blowup after shock exit: max={p.max()}"

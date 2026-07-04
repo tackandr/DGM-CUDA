@@ -118,7 +118,7 @@ def build_limiter_data(N):
 # Scalar limiter
 # ---------------------------------------------------------------------------
 
-def limit_scalar(u, J, tvb_constant=50.0):
+def limit_scalar(u, J, tvb_constant=50.0, bc_type="periodic"):
     """Apply a TVB minmod limiter to a scalar DG field.
 
     Preserves the cell average and, when a cell is flagged as troubled,
@@ -134,6 +134,11 @@ def limit_scalar(u, J, tvb_constant=50.0):
         Per-element Jacobians.  The physical element width is dx = 2J.
     tvb_constant : float, optional
         TVB constant (default 50).
+    bc_type : {'periodic', 'transmissive'}, optional
+        Boundary condition type (default 'periodic').  For 'transmissive',
+        the ghost cell averages at the domain boundaries are set equal to
+        the boundary element averages (zero-gradient extrapolation) so
+        that the periodic np.roll is not applied across the domain edges.
 
     Returns
     -------
@@ -148,6 +153,9 @@ def limit_scalar(u, J, tvb_constant=50.0):
     cell_average = u @ mean_weights
     avg_left = np.roll(cell_average, 1)
     avg_right = np.roll(cell_average, -1)
+    if bc_type == "transmissive":
+        avg_left[0] = cell_average[0]
+        avg_right[-1] = cell_average[-1]
 
     left_slope = cell_average - u[:, 0]
     right_slope = u[:, N] - cell_average
@@ -217,7 +225,7 @@ def _roe_eigenvectors_euler(rho_avg, u_avg, H_avg, c_avg, gamma):
     return R, L
 
 
-def limit_system(U, J, gamma=1.4, tvb_constant=50.0):
+def limit_system(U, J, gamma=1.4, tvb_constant=50.0, bc_type="periodic"):
     """Apply a TVB minmod limiter to a conserved-variable system.
 
     For each troubled element (detected component-wise), rotates the solution
@@ -239,6 +247,10 @@ def limit_system(U, J, gamma=1.4, tvb_constant=50.0):
         limit_scalar applied independently to each variable).
     tvb_constant : float, optional
         TVB constant (default 50).
+    bc_type : {'periodic', 'transmissive'}, optional
+        Boundary condition type (default 'periodic').  For 'transmissive',
+        ghost cell averages at the domain boundaries equal the boundary
+        element averages (zero-gradient extrapolation).
 
     Returns
     -------
@@ -252,7 +264,7 @@ def limit_system(U, J, gamma=1.4, tvb_constant=50.0):
 
     if nvar != 3:
         # Fallback: apply scalar limiter to each component independently
-        return np.stack([limit_scalar(U[v], J, tvb_constant) for v in range(nvar)])
+        return np.stack([limit_scalar(U[v], J, tvb_constant, bc_type) for v in range(nvar)])
 
     r, mean_weights = build_limiter_data(N)
     J = np.asarray(J, dtype=float)
@@ -263,6 +275,9 @@ def limit_system(U, J, gamma=1.4, tvb_constant=50.0):
     cell_avg = U @ mean_weights          # (nvar, M)
     avg_L = np.roll(cell_avg, 1, axis=1)
     avg_R = np.roll(cell_avg, -1, axis=1)
+    if bc_type == "transmissive":
+        avg_L[:, 0] = cell_avg[:, 0]
+        avg_R[:, -1] = cell_avg[:, -1]
 
     # Detect troubled cells using component-wise slope checking
     left_slope = cell_avg - U[:, :, 0]   # (nvar, M)
@@ -288,8 +303,12 @@ def limit_system(U, J, gamma=1.4, tvb_constant=50.0):
     for m in troubled_idx:
         # Build Roe-averaged state between left and right neighbours for this element
         # Use cell averages of the left and right neighbours
-        m_l = (m - 1) % M
-        m_r = (m + 1) % M
+        if bc_type == "transmissive":
+            m_l = 0 if m == 0 else m - 1
+            m_r = M - 1 if m == M - 1 else m + 1
+        else:
+            m_l = (m - 1) % M
+            m_r = (m + 1) % M
         U_l = cell_avg[:, m_l]
         U_r = cell_avg[:, m_r]
 
