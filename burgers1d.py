@@ -197,7 +197,7 @@ def exact_sine_solution(x, t, tol=1e-13, max_iter=50):
     raise RuntimeError("Newton iteration did not converge for the analytical sine-wave solution")
 
 
-@lru_cache(maxsize=None)
+@lru_cache(maxsize=16)
 def _build_weak_form_operators(N):
     """Return exact reference-element weak-form operators for degree N."""
     r = legendreGL(N)
