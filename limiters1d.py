@@ -151,12 +151,13 @@ def limit_scalar(u, J, tvb_constant=50.0):
 
     left_slope = cell_average - u[:, 0]
     right_slope = u[:, N] - cell_average
-    centered_slope = 0.5 * (avg_right - avg_left)
+    forward_diff = avg_right - cell_average
+    backward_diff = cell_average - avg_left
     dx = 2.0 * np.asarray(J, dtype=float)
     tvb_threshold = tvb_constant * dx * dx
 
-    limited_left = tvb_minmod(left_slope, left_slope, centered_slope, tvb_threshold)
-    limited_right = tvb_minmod(right_slope, right_slope, centered_slope, tvb_threshold)
+    limited_left = tvb_minmod(left_slope, forward_diff, backward_diff, tvb_threshold)
+    limited_right = tvb_minmod(right_slope, forward_diff, backward_diff, tvb_threshold)
     limited_slope = 0.5 * (limited_left + limited_right)
 
     troubled = (np.abs(limited_left - left_slope) > 1e-12) | (np.abs(limited_right - right_slope) > 1e-12)
@@ -266,10 +267,11 @@ def limit_system(U, J, gamma=1.4, tvb_constant=50.0):
     # Detect troubled cells using component-wise slope checking
     left_slope = cell_avg - U[:, :, 0]   # (nvar, M)
     right_slope = U[:, :, N] - cell_avg  # (nvar, M)
-    centered = 0.5 * (avg_R - avg_L)     # (nvar, M)
+    forward_diff = avg_R - cell_avg      # (nvar, M)
+    backward_diff = cell_avg - avg_L     # (nvar, M)
 
-    limited_left_comp = tvb_minmod(left_slope, left_slope, centered, tvb_threshold[np.newaxis, :])
-    limited_right_comp = tvb_minmod(right_slope, right_slope, centered, tvb_threshold[np.newaxis, :])
+    limited_left_comp = tvb_minmod(left_slope, forward_diff, backward_diff, tvb_threshold[np.newaxis, :])
+    limited_right_comp = tvb_minmod(right_slope, forward_diff, backward_diff, tvb_threshold[np.newaxis, :])
 
     troubled = np.any(
         (np.abs(limited_left_comp - left_slope) > 1e-12) |
@@ -336,9 +338,10 @@ def limit_system(U, J, gamma=1.4, tvb_constant=50.0):
         for k in range(3):
             ls = w_mean[k] - w_elem[k, 0]
             rs = w_elem[k, N] - w_mean[k]
-            cent = 0.5 * (w_avg_r[k] - w_avg_l[k])
-            ll = tvb_minmod(np.array([ls]), np.array([ls]), np.array([cent]), np.array([thr]))[0]
-            lr = tvb_minmod(np.array([rs]), np.array([rs]), np.array([cent]), np.array([thr]))[0]
+            fwd = w_avg_r[k] - w_mean[k]
+            bwd = w_mean[k] - w_avg_l[k]
+            ll = tvb_minmod(np.array([ls]), np.array([fwd]), np.array([bwd]), np.array([thr]))[0]
+            lr = tvb_minmod(np.array([rs]), np.array([fwd]), np.array([bwd]), np.array([thr]))[0]
             lslope = 0.5 * (ll + lr)
             w_limited[k] = w_mean[k] + lslope * r
 
