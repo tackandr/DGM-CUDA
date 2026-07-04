@@ -340,8 +340,8 @@ def limit_system(U, J, gamma=1.4, tvb_constant=50.0):
             rs = w_elem[k, N] - w_mean[k]
             fwd = w_avg_r[k] - w_mean[k]
             bwd = w_mean[k] - w_avg_l[k]
-            ll = tvb_minmod(np.array([ls]), np.array([fwd]), np.array([bwd]), np.array([thr]))[0]
-            lr = tvb_minmod(np.array([rs]), np.array([fwd]), np.array([bwd]), np.array([thr]))[0]
+            ll = tvb_minmod(ls, fwd, bwd, thr)
+            lr = tvb_minmod(rs, fwd, bwd, thr)
             lslope = 0.5 * (ll + lr)
             w_limited[k] = w_mean[k] + lslope * r
 

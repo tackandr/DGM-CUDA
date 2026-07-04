@@ -371,7 +371,7 @@ class TestSimulate:
         _, mw = build_limiter_data(N)
         avg_num = u @ mw
         avg_ex  = u_exact @ mw
-        h = (2.0) / M
+        h = 2.0 / M
         l1_err = h * np.abs(avg_num - avg_ex).sum()
         assert l1_err < 5e-3, f"Cell-average L1 error too large: {l1_err:.2e}"
 
