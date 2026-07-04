@@ -178,7 +178,7 @@ def exact_sine_solution(x, t, tol=1e-13, max_iter=50):
         u(x, t) = sin(pi * (x - t * u(x, t)))
 
     which is single-valued only before the first shock forms at t = 1 / pi.
-    """
+
     Parameters
     ----------
     x : array_like
