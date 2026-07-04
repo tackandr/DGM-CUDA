@@ -20,14 +20,23 @@ build_mesh          -- uniform physical node coordinates, shape (M, N+1)
 build_operators     -- V, D, LIFT matrices for the reference element
 build_connectivity  -- EToE / EToF connectivity arrays, shape (M, 2)
 numerical_flux      -- local Lax-Friedrichs flux for Burgers' equation
+exact_sine_solution -- pre-shock analytical solution for u(x,0) = sin(pi x)
 burgers_rhs         -- DG right-hand side, shape (M, N+1)
 rk4_step            -- one classical RK4 advance
 simulate            -- full time-integration driver
 """
 
+from functools import lru_cache
+
 import numpy as np
 
-from dgm1d import legendreGL, Vandermonde1D, DMatrix1D, Lift1D
+from dgm1d import (
+    legendreGL,
+    Vandermonde1D,
+    GradVandermonde1D,
+    DMatrix1D,
+    Lift1D,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +166,59 @@ def numerical_flux(u_minus, u_plus):
     return 0.5 * (0.5 * u_minus**2 + 0.5 * u_plus**2) - 0.5 * alpha * (u_plus - u_minus)
 
 
+def exact_sine_solution(x, t, tol=1e-13, max_iter=50):
+    """Return the analytical pre-shock Burgers solution for u(x,0)=sin(pi x).
+
+    For inviscid Burgers, characteristics give the implicit relation
+
+        u(x, t) = sin(pi * (x - t * u(x, t)))
+
+    which is single-valued only before the first shock forms at t = 1 / pi.
+    """
+    if t < 0.0:
+        raise ValueError("t must be non-negative")
+    if t >= 1.0 / np.pi:
+        raise ValueError("exact_sine_solution is only defined before shock formation (t < 1/pi)")
+
+    x = np.asarray(x, dtype=float)
+    if t == 0.0:
+        return np.sin(np.pi * x)
+
+    u = np.sin(np.pi * x)
+    for _ in range(max_iter):
+        phase = np.pi * (x - t * u)
+        residual = u - np.sin(phase)
+        jacobian = 1.0 + np.pi * t * np.cos(phase)
+        delta = residual / jacobian
+        u -= delta
+        if np.max(np.abs(delta)) < tol:
+            return u
+
+    raise RuntimeError("Newton iteration did not converge for the analytical sine-wave solution")
+
+
+@lru_cache(maxsize=None)
+def _build_weak_form_operators(N):
+    """Return exact reference-element weak-form operators for degree N."""
+    r = legendreGL(N)
+    V = Vandermonde1D(N, r)
+    V_inv = np.linalg.inv(V)
+
+    q_order = max(2 * N + 3, 8)
+    q_nodes, q_weights = np.polynomial.legendre.leggauss(q_order)
+    Vq = Vandermonde1D(N, q_nodes)
+    Vrq = GradVandermonde1D(N, q_nodes)
+
+    interp = Vq @ V_inv
+    grad_interp = Vrq @ V_inv
+    weighted_interp = q_weights[:, np.newaxis] * interp
+
+    mass = interp.T @ weighted_interp
+    inv_mass = np.linalg.inv(mass)
+    stiffness = weighted_interp.T @ grad_interp
+    return inv_mass, stiffness
+
+
 # ---------------------------------------------------------------------------
 # DG right-hand side
 # ---------------------------------------------------------------------------
@@ -195,51 +257,22 @@ def burgers_rhs(u, D, LIFT, J, EToE, EToF):
     -------
     rhs : ndarray, shape (M, N+1)
     """
+    if D.shape[0] != u.shape[1] or LIFT.shape != (u.shape[1], 2):
+        raise ValueError("D and LIFT must match the element polynomial order carried by u")
+
     N = u.shape[1] - 1
-    fmask = np.array([0, N])     # local node index for each face (left=0, right=N)
-    normals = np.array([-1.0, 1.0])  # outward normals at left and right faces
+    inv_mass, stiffness = _build_weak_form_operators(N)
 
-    # Physical flux at all nodes
-    flux = 0.5 * u**2            # shape (M, N+1)
+    flux = 0.5 * u**2
+    boundary = np.zeros_like(u)
 
-    # --- Volume term ---
-    # vol[m] = D @ flux[m]  =>  vol = flux @ D.T   shape (M, N+1)
-    vol = flux @ D.T
+    left_neigh = EToE[:, 0]
+    right_neigh = EToE[:, 1]
+    boundary[:, 0] = -numerical_flux(u[left_neigh, N], u[:, 0])
+    boundary[:, N] = numerical_flux(u[:, N], u[right_neigh, 0])
 
-    # --- Surface term ---
-    # Boundary (interior) values of the current element at each face, shape (M, 2)
-    u_int = np.stack([u[:, fmask[0]], u[:, fmask[1]]], axis=1)
-
-    # Exterior values gathered from neighboring elements, shape (M, 2)
-    u_ext = np.empty_like(u_int)
-    for f in range(2):
-        neigh_elem = EToE[:, f]            # (M,) indices of neighboring elements
-        neigh_node = fmask[EToF[:, f]]     # (M,) local node on the neighbor's face
-        u_ext[:, f] = u[neigh_elem, neigh_node]
-
-    # Compute single-valued interface fluxes using a consistent L-R orientation:
-    #   Face 0 (left):  minus-side = left-neighbor's right boundary (u_ext[:,0])
-    #                   plus-side  = current element's left boundary  (u_int[:,0])
-    #   Face 1 (right): minus-side = current element's right boundary (u_int[:,1])
-    #                   plus-side  = right-neighbor's left boundary   (u_ext[:,1])
-    # The same F* is therefore used by both elements sharing an interface,
-    # which is the requirement for the scheme to be in conservation form.
-    f_star = np.stack([
-        numerical_flux(u_ext[:, 0], u_int[:, 0]),   # face 0: L=neighbour, R=current
-        numerical_flux(u_int[:, 1], u_ext[:, 1]),   # face 1: L=current,   R=neighbour
-    ], axis=1)  # shape (M, 2)
-
-    # Interior flux at the boundary nodes, shape (M, 2)
-    f_interior = 0.5 * u_int**2
-
-    # Flux difference scaled by outward normal: n * (F* - f_interior), shape (M, 2)
-    flux_diff = normals * (f_star - f_interior)
-
-    # Distribute boundary corrections to interior DOFs via LIFT
-    # LIFT is (N+1, 2); flux_diff.T is (2, M) → result is (N+1, M), then transpose
-    surf = (LIFT @ flux_diff.T).T          # shape (M, N+1)
-
-    return (vol - surf) / J[:, np.newaxis]
+    residual = flux @ stiffness - boundary
+    return (residual @ inv_mass.T) / J[:, np.newaxis]
 
 
 # ---------------------------------------------------------------------------

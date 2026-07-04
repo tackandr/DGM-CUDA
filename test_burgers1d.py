@@ -8,6 +8,7 @@ from burgers1d import (
     build_mesh,
     build_operators,
     burgers_rhs,
+    exact_sine_solution,
     numerical_flux,
     rk4_step,
     simulate,
@@ -310,3 +311,24 @@ class TestSimulate:
             x, u, t = simulate(M, 2, t_final=0.05)
             assert u.shape == (M, 3)
             assert np.all(np.isfinite(u))
+
+    def test_matches_exact_sine_solution_before_shock(self):
+        """A longer pre-shock run stays stable and matches the analytical sine-wave solution."""
+        M, N = 40, 4
+        t_final = 0.3
+        x, u, t = simulate(M, N, t_final=t_final)
+        u_exact = exact_sine_solution(x, t)
+        assert np.all(np.isfinite(u))
+        np.testing.assert_allclose(u, u_exact, atol=1.6e-2, rtol=2.0e-2)
+
+
+class TestExactSineSolution:
+    def test_initial_time_matches_sine_wave(self):
+        """The analytical solution reduces to the initial sine wave at t=0."""
+        x = np.linspace(0.0, 2.0, 21)
+        np.testing.assert_allclose(exact_sine_solution(x, 0.0), np.sin(np.pi * x), atol=1e-14)
+
+    def test_rejects_post_shock_time(self):
+        """The closed-form characteristic solution is only used before shock formation."""
+        with pytest.raises(ValueError):
+            exact_sine_solution(np.array([0.25, 0.75]), 1.0 / np.pi)
