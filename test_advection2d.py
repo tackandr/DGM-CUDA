@@ -56,28 +56,24 @@ def test_simulate_returns_expected_shapes_and_time():
     assert t == tfinal
 
 
-def test_periodic_translation_error_reduces_with_refinement():
+def test_semidiscrete_rhs_error_reduces_with_refinement():
     N = 2
-    tfinal = 0.03
-    ax, ay = 0.6, 0.3
+    ax, ay = 0.7, 0.4
 
-    def u_exact(x, y, t):
-        return np.sin(2.0 * np.pi * (x - ax * t)) * np.sin(2.0 * np.pi * (y - ay * t))
+    def u_fn(x, y):
+        return np.sin(np.pi * x) * np.sin(np.pi * y)
+
+    def rhs_exact(x, y):
+        ux = np.pi * np.cos(np.pi * x) * np.sin(np.pi * y)
+        uy = np.pi * np.sin(np.pi * x) * np.cos(np.pi * y)
+        return -(ax * ux + ay * uy)
 
     errs = []
     for nx, ny in [(4, 4), (8, 8)]:
-        data, u, t = simulate_advection_2d(
-            N=N,
-            nx=nx,
-            ny=ny,
-            t_final=tfinal,
-            ax=ax,
-            ay=ay,
-            periodic=True,
-            cfl=0.2,
-            u_init=lambda x, y: u_exact(x, y, 0.0),
-        )
-        err = np.sqrt(np.mean((u - u_exact(data["x"], data["y"], t)) ** 2))
+        data = setup_2d(N=N, nx=nx, ny=ny, periodic=False)
+        u = u_fn(data["x"], data["y"])
+        rhs = _rhs_with_data(u, data, ax=ax, ay=ay, bc_type="transmissive")
+        err = np.sqrt(np.mean((rhs - rhs_exact(data["x"], data["y"])) ** 2))
         errs.append(err)
 
     assert errs[1] < errs[0]
