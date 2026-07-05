@@ -19,7 +19,8 @@ Public API
 build_mesh          -- uniform physical node coordinates, shape (M, N+1)
 build_operators     -- V, D, LIFT matrices for the reference element
 build_connectivity  -- EToE / EToF connectivity arrays, shape (M, 2)
-numerical_flux      -- Godunov upwind flux for Burgers' equation
+burgers_godunov_flux -- Godunov upwind flux for Burgers' equation
+numerical_flux      -- alias for burgers_godunov_flux (backward compat)
 exact_sine_solution -- pre-shock analytical solution for u(x,0) = sin(pi x)
 burgers_rhs         -- DG right-hand side, shape (M, N+1)
 limit_solution      -- TVB minmod limiter for troubled cells
@@ -35,120 +36,30 @@ from dgm1d import (
     legendreGL,
     Vandermonde1D,
     GradVandermonde1D,
-    DMatrix1D,
-    Lift1D,
 )
 
+from mesh1d import build_mesh, build_operators, build_connectivity  # noqa: F401
 
-# ---------------------------------------------------------------------------
-# Mesh and operator construction
-# ---------------------------------------------------------------------------
-
-def build_mesh(M, N, x_left=0.0, x_right=2.0):
-    """Return the physical node coordinates for a uniform mesh.
-
-    The domain [x_left, x_right] is divided into M equal elements.  Within
-    each element the N+1 Gauss-Lobatto-Legendre (GLL) nodes are mapped from
-    the reference element [-1, 1] to the physical element [a, b].
-
-    Parameters
-    ----------
-    M : int
-        Number of elements.
-    N : int
-        Polynomial order; each element has N+1 nodes.
-    x_left, x_right : float
-        Domain boundaries.
-
-    Returns
-    -------
-    x : ndarray, shape (M, N+1)
-        Physical coordinates.  x[m, i] is the i-th node of element m.
-    r : ndarray, shape (N+1,)
-        GLL reference nodes on [-1, 1].
-    """
-    r = legendreGL(N)
-    boundaries = np.linspace(x_left, x_right, M + 1)
-    x = np.empty((M, N + 1))
-    for m in range(M):
-        a, b = boundaries[m], boundaries[m + 1]
-        x[m] = 0.5 * (b - a) * r + 0.5 * (a + b)
-    return x, r
-
-
-def build_operators(N, r):
-    """Return the DG operators for the reference element of order N.
-
-    Parameters
-    ----------
-    N : int
-        Polynomial order.
-    r : ndarray, shape (N+1,)
-        GLL reference nodes (e.g. from legendreGL(N)).
-
-    Returns
-    -------
-    V : ndarray, shape (N+1, N+1)
-        Vandermonde matrix.
-    D : ndarray, shape (N+1, N+1)
-        Nodal differentiation matrix.  Applying D @ u_ref gives the derivative
-        of the interpolating polynomial at the reference nodes.
-    LIFT : ndarray, shape (N+1, 2)
-        Lift operator mapping two boundary flux values to N+1 nodal residuals.
-    """
-    V = Vandermonde1D(N, r)
-    D = DMatrix1D(N, r)
-    LIFT = Lift1D(N, V)
-    return V, D, LIFT
-
-
-# ---------------------------------------------------------------------------
-# Connectivity
-# ---------------------------------------------------------------------------
-
-def build_connectivity(M):
-    """Return element-to-element and element-to-face connectivity arrays.
-
-    For a 1D periodic mesh of M elements, each element has two faces:
-      face 0 = left face,  face 1 = right face.
-
-    The connectivity is:
-      Left  neighbor of element m : element (m-1) % M, face 1 (its right face)
-      Right neighbor of element m : element (m+1) % M, face 0 (its left face)
-
-    Parameters
-    ----------
-    M : int
-        Number of elements.
-
-    Returns
-    -------
-    EToE : ndarray, shape (M, 2), dtype int
-        EToE[m, f] is the index of the element neighboring element m at face f.
-    EToF : ndarray, shape (M, 2), dtype int
-        EToF[m, f] is the face index on the neighboring element EToE[m, f]
-        that is shared with element m at face f.
-    """
-    idx = np.arange(M)
-    EToE = np.stack([(idx - 1) % M, (idx + 1) % M], axis=1).astype(int)
-    EToF = np.zeros((M, 2), dtype=int)
-    EToF[:, 0] = 1  # left face's neighbor contributes its right face
-    # EToF[:, 1] = 0 already (right face's neighbor contributes its left face)
-    return EToE, EToF
+from limiters1d import (                                               # noqa: E402
+    minmod3 as _minmod3_lib,
+    tvb_minmod as _tvb_minmod_lib,
+    build_limiter_data as _build_limiter_data_lib,
+    limit_scalar as limit_solution,
+)
 
 
 # ---------------------------------------------------------------------------
 # Numerical flux
 # ---------------------------------------------------------------------------
 
-def numerical_flux(u_minus, u_plus):
+def burgers_godunov_flux(u_minus, u_plus):
     """Godunov upwind numerical flux for Burgers' equation.
 
     For the convex Burgers flux f(u) = u^2 / 2, the Godunov flux equals the
     upwind state selected by the local Riemann problem:
 
-      * shocks (u- > u+) use the state indicated by the shock speed
-      * rarefactions (u- <= u+) use the left state if both states are positive,
+      * shocks (u- > u+): use the state indicated by the shock speed
+      * rarefactions (u- <= u+): use the left state if both are positive,
         the right state if both are negative, and zero when the fan straddles 0
 
     Operates element-wise; inputs may be scalars or arrays of any shape.
@@ -168,6 +79,10 @@ def numerical_flux(u_minus, u_plus):
         np.where(u_minus >= 0.0, flux_minus, 0.0),
     )
     return np.where(shock, shock_flux, rarefaction_flux)
+
+
+# Backward-compatible alias
+numerical_flux = burgers_godunov_flux
 
 
 def exact_sine_solution(x, t, tol=1e-13, max_iter=50):
@@ -240,87 +155,6 @@ def _build_weak_form_operators(N):
     inv_mass = np.linalg.solve(mass, np.eye(mass.shape[0]))
     stiffness = weighted_interp.T @ grad_interp
     return inv_mass, stiffness
-
-
-@lru_cache(maxsize=16)
-def _build_limiter_data(N):
-    """Return reference-node and cell-average data used by the limiter."""
-    r = legendreGL(N)
-    V = Vandermonde1D(N, r)
-    V_inv = np.linalg.solve(V, np.eye(V.shape[0]))
-
-    q_order = _quadrature_order(N)
-    q_nodes, q_weights = np.polynomial.legendre.leggauss(q_order)
-    Vq = Vandermonde1D(N, q_nodes)
-    interp = Vq @ V_inv
-    mean_weights = 0.5 * (q_weights @ interp)
-    return r, mean_weights
-
-
-def _minmod3(a, b, c):
-    """Return the minmod of three same-shaped arrays."""
-    same_sign = (np.sign(a) == np.sign(b)) & (np.sign(a) == np.sign(c))
-    magnitude = np.minimum(np.abs(a), np.minimum(np.abs(b), np.abs(c)))
-    return np.where(same_sign, np.sign(a) * magnitude, 0.0)
-
-
-def _tvb_minmod(a, b, c, tvb_threshold):
-    """Return the TVB minmod of three arrays."""
-    return np.where(np.abs(a) <= tvb_threshold, a, _minmod3(a, b, c))
-
-
-def limit_solution(u, J, tvb_constant=50.0):
-    """Apply a TVB minmod limiter to troubled elements.
-
-    The limiter preserves the cell average and, when activated, replaces the
-    local polynomial by a bounded linear profile built from limited edge slopes.
-    The TVB threshold prevents clipping smooth extrema before the first shock.
-
-    Parameters
-    ----------
-    u : ndarray, shape (M, N+1)
-        Current nodal values.
-    J : array_like, shape (M,)
-        Per-element Jacobians, used to build the TVB threshold from the local
-        element width dx = 2J.
-    tvb_constant : float, optional
-        TVB constant controlling how aggressively smooth extrema are preserved.
-
-    Returns
-    -------
-    ndarray, shape (M, N+1)
-        Limited nodal values.
-    """
-    N = u.shape[1] - 1
-    if N <= 1:
-        return u
-
-    r, mean_weights = _build_limiter_data(N)
-    cell_average = u @ mean_weights
-    avg_left = np.roll(cell_average, 1)
-    avg_right = np.roll(cell_average, -1)
-
-    left_slope = cell_average - u[:, 0]
-    right_slope = u[:, N] - cell_average
-    centered_slope = 0.5 * (avg_right - avg_left)
-    dx = 2.0 * np.asarray(J, dtype=float)
-    # The TVB limiter relaxes to the unlimited polynomial for smooth extrema,
-    # whose boundary deviations scale like O(dx^2) on a uniform mesh.
-    tvb_threshold = tvb_constant * dx * dx
-
-    # Each edge slope is limited against the neighbour-based centred slope while
-    # preserving the classic three-argument minmod structure used in DG limiters.
-    limited_left = _tvb_minmod(left_slope, left_slope, centered_slope, tvb_threshold)
-    limited_right = _tvb_minmod(right_slope, right_slope, centered_slope, tvb_threshold)
-    limited_slope = 0.5 * (limited_left + limited_right)
-
-    troubled = (np.abs(limited_left - left_slope) > 1e-12) | (np.abs(limited_right - right_slope) > 1e-12)
-    if not np.any(troubled):
-        return u
-
-    limited = u.copy()
-    limited[troubled] = cell_average[troubled, np.newaxis] + limited_slope[troubled, np.newaxis] * r[np.newaxis, :]
-    return limited
 
 
 # ---------------------------------------------------------------------------
