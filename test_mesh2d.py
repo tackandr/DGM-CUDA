@@ -87,3 +87,36 @@ def test_normals_unit_length_and_fscale_positive():
 
     np.testing.assert_allclose(np.sqrt(nxv**2 + nyv**2), 1.0, atol=1e-12)
     assert np.all(Fscale > 0.0)
+
+
+def _bell_gradient_error(N, nx, ny):
+    data = setup_2d(N=N, nx=nx, ny=ny, periodic=True)
+    x = data["x"]
+    y = data["y"]
+
+    x0, y0 = 0.43, 0.31
+    sigma = 0.18
+    dx = x - x0
+    dy = y - y0
+    u = np.exp(-(dx**2 + dy**2) / sigma**2)
+    ux_exact = -2.0 * dx * u / sigma**2
+    uy_exact = -2.0 * dy * u / sigma**2
+
+    ur = u @ data["Dr"].T
+    us = u @ data["Ds"].T
+    ux = data["rx"] * ur + data["sx"] * us
+    uy = data["ry"] * ur + data["sy"] * us
+
+    err_x = np.sqrt(np.mean((ux - ux_exact) ** 2))
+    err_y = np.sqrt(np.mean((uy - uy_exact) ** 2))
+    return err_x, err_y
+
+
+def test_gradient_operators_bell_curve_error_decreases_with_refinement():
+    coarse_x, coarse_y = _bell_gradient_error(N=3, nx=4, ny=4)
+    fine_x, fine_y = _bell_gradient_error(N=3, nx=8, ny=8)
+
+    assert fine_x < coarse_x / 4.0
+    assert fine_y < coarse_y / 4.0
+    assert fine_x < 0.08
+    assert fine_y < 0.08
