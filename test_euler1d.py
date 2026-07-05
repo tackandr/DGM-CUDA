@@ -13,18 +13,16 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 
-from fluxes1d import (
+from limiters1d import build_limiter_data
+from euler1d import (
+    build_mesh,
+    build_operators,
+    build_connectivity,
     euler_physical_flux,
     euler_pressure,
     euler_lax_friedrichs_flux,
     euler_roe_flux,
     euler_hllc_flux,
-)
-from limiters1d import build_limiter_data, limit_scalar
-from euler1d import (
-    build_mesh,
-    build_operators,
-    build_connectivity,
     sod_ic,
     sod_exact_solution,
     euler_rhs,

@@ -5,7 +5,9 @@ import pytest
 from numpy import linalg as LA
 
 from dgm1d import (
+    D2Matrix1D,
     DMatrix1D,
+    Grad2Vandermonde1D,
     GradVandermonde1D,
     Jacobian,
     Lift1D,
@@ -262,3 +264,98 @@ class TestLift1D:
         Emat[N, 1] = 1.0
         expected = V @ (V.T @ Emat)
         np.testing.assert_allclose(LIFT, expected, atol=1e-14)
+
+
+# ---------------------------------------------------------------------------
+# Grad2Vandermonde1D
+# ---------------------------------------------------------------------------
+
+class TestGrad2Vandermonde1D:
+    def test_shape(self):
+        """Second-derivative Vandermonde has shape (len(r), N+1)."""
+        for N in range(2, 6):
+            r = legendreGL(N)
+            Vr2 = Grad2Vandermonde1D(N, r)
+            assert Vr2.shape == (N + 1, N + 1)
+
+    def test_first_two_columns_zero(self):
+        """Second derivative of the degree-0 and degree-1 polynomials is 0."""
+        for N in range(2, 6):
+            r = legendreGL(N)
+            Vr2 = Grad2Vandermonde1D(N, r)
+            np.testing.assert_allclose(Vr2[:, 0], 0.0, atol=1e-13)
+            np.testing.assert_allclose(Vr2[:, 1], 0.0, atol=1e-13)
+
+    def test_degree2_second_derivative(self):
+        """Second derivative of normalised P_2: sqrt(5/2)*(3x^2-1)/2 -> sqrt(5/2)*3."""
+        # d²/dx² [sqrt(5/2) * (3x²-1)/2] = sqrt(5/2) * 3  (constant)
+        for N in range(2, 6):
+            r = legendreGL(N)
+            Vr2 = Grad2Vandermonde1D(N, r)
+            expected = np.full(N + 1, np.sqrt(5.0 / 2.0) * 3.0)
+            np.testing.assert_allclose(Vr2[:, 2], expected, atol=1e-11)
+
+    def test_consistent_with_grad_vandermonde(self):
+        """Vr2 must equal the derivative of GradVandermonde1D computed by finite differences."""
+        N = 4
+        r = legendreGL(N)
+        Vr2 = Grad2Vandermonde1D(N, r)
+        eps = 1e-5
+        Vr_plus = GradVandermonde1D(N, r + eps)
+        Vr_minus = GradVandermonde1D(N, r - eps)
+        Vr2_fd = (Vr_plus - Vr_minus) / (2.0 * eps)
+        np.testing.assert_allclose(Vr2, Vr2_fd, atol=1e-8)
+
+
+# ---------------------------------------------------------------------------
+# D2Matrix1D
+# ---------------------------------------------------------------------------
+
+class TestD2Matrix1D:
+    def _setup(self, N):
+        r = legendreGL(N)
+        D2 = D2Matrix1D(N, r)
+        return r, D2
+
+    def test_shape(self):
+        """D2 has shape (N+1, N+1)."""
+        for N in range(2, 7):
+            r, D2 = self._setup(N)
+            assert D2.shape == (N + 1, N + 1)
+
+    def test_second_derivative_constant(self):
+        """D2 applied to a constant vector gives zero."""
+        for N in range(2, 7):
+            r, D2 = self._setup(N)
+            f = np.ones(N + 1)
+            np.testing.assert_allclose(D2 @ f, 0.0, atol=1e-11)
+
+    def test_second_derivative_linear(self):
+        """D2 applied to f(x)=x gives d²f/dx²=0 everywhere."""
+        for N in range(2, 7):
+            r, D2 = self._setup(N)
+            np.testing.assert_allclose(D2 @ r, 0.0, atol=1e-11)
+
+    def test_second_derivative_x_squared(self):
+        """D2 applied to f(x)=x^2 gives d²f/dx²=2 everywhere."""
+        for N in range(2, 7):
+            r, D2 = self._setup(N)
+            f = r ** 2
+            np.testing.assert_allclose(D2 @ f, 2.0, atol=1e-10)
+
+    def test_second_derivative_cubic(self):
+        """D2 applied to f(x)=x^3 gives d²f/dx²=6x at each node (N>=3)."""
+        for N in range(3, 7):
+            r, D2 = self._setup(N)
+            f = r ** 3
+            np.testing.assert_allclose(D2 @ f, 6.0 * r, atol=1e-9)
+
+    def test_equals_d_squared(self):
+        """D2 @ u should equal D @ (D @ u) for any polynomial of degree <= N."""
+        for N in range(3, 7):
+            r = legendreGL(N)
+            D = DMatrix1D(N, r)
+            D2 = D2Matrix1D(N, r)
+            f = r ** 3
+            np.testing.assert_allclose(D2 @ f, D @ (D @ f), atol=1e-9)
+

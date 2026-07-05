@@ -19,7 +19,8 @@ Public API
 build_mesh          -- uniform physical node coordinates, shape (M, N+1)
 build_operators     -- V, D, LIFT matrices for the reference element
 build_connectivity  -- EToE / EToF connectivity arrays, shape (M, 2)
-numerical_flux      -- Godunov upwind flux for Burgers' equation
+burgers_godunov_flux -- Godunov upwind flux for Burgers' equation
+numerical_flux      -- alias for burgers_godunov_flux (backward compat)
 exact_sine_solution -- pre-shock analytical solution for u(x,0) = sin(pi x)
 burgers_rhs         -- DG right-hand side, shape (M, N+1)
 limit_solution      -- TVB minmod limiter for troubled cells
@@ -35,16 +36,10 @@ from dgm1d import (
     legendreGL,
     Vandermonde1D,
     GradVandermonde1D,
-    DMatrix1D,
-    Lift1D,
 )
 
-# ---------------------------------------------------------------------------
-# Import shared limiter and flux primitives from library modules.
-# The public names (numerical_flux, limit_solution) are unchanged so that
-# existing code and tests that import from burgers1d continue to work.
-# ---------------------------------------------------------------------------
-from fluxes1d import burgers_godunov_flux as numerical_flux           # noqa: E402
+from mesh1d import build_mesh, build_operators, build_connectivity  # noqa: F401
+
 from limiters1d import (                                               # noqa: E402
     minmod3 as _minmod3_lib,
     tvb_minmod as _tvb_minmod_lib,
@@ -54,100 +49,40 @@ from limiters1d import (                                               # noqa: E
 
 
 # ---------------------------------------------------------------------------
-# Mesh and operator construction
+# Numerical flux
 # ---------------------------------------------------------------------------
 
-def build_mesh(M, N, x_left=0.0, x_right=2.0):
-    """Return the physical node coordinates for a uniform mesh.
+def burgers_godunov_flux(u_minus, u_plus):
+    """Godunov upwind numerical flux for Burgers' equation.
 
-    The domain [x_left, x_right] is divided into M equal elements.  Within
-    each element the N+1 Gauss-Lobatto-Legendre (GLL) nodes are mapped from
-    the reference element [-1, 1] to the physical element [a, b].
+    For the convex Burgers flux f(u) = u^2 / 2, the Godunov flux equals the
+    upwind state selected by the local Riemann problem:
 
-    Parameters
-    ----------
-    M : int
-        Number of elements.
-    N : int
-        Polynomial order; each element has N+1 nodes.
-    x_left, x_right : float
-        Domain boundaries.
+      * shocks (u- > u+): use the state indicated by the shock speed
+      * rarefactions (u- <= u+): use the left state if both are positive,
+        the right state if both are negative, and zero when the fan straddles 0
 
-    Returns
-    -------
-    x : ndarray, shape (M, N+1)
-        Physical coordinates.  x[m, i] is the i-th node of element m.
-    r : ndarray, shape (N+1,)
-        GLL reference nodes on [-1, 1].
+    Operates element-wise; inputs may be scalars or arrays of any shape.
     """
-    r = legendreGL(N)
-    boundaries = np.linspace(x_left, x_right, M + 1)
-    x = np.empty((M, N + 1))
-    for m in range(M):
-        a, b = boundaries[m], boundaries[m + 1]
-        x[m] = 0.5 * (b - a) * r + 0.5 * (a + b)
-    return x, r
+    u_minus = np.asarray(u_minus, dtype=float)
+    u_plus = np.asarray(u_plus, dtype=float)
+    flux_minus = 0.5 * u_minus**2
+    flux_plus = 0.5 * u_plus**2
+
+    shock = u_minus > u_plus
+    shock_speed = 0.5 * (u_minus + u_plus)
+    shock_flux = np.where(shock_speed >= 0.0, flux_minus, flux_plus)
+
+    rarefaction_flux = np.where(
+        u_plus <= 0.0,
+        flux_plus,
+        np.where(u_minus >= 0.0, flux_minus, 0.0),
+    )
+    return np.where(shock, shock_flux, rarefaction_flux)
 
 
-def build_operators(N, r):
-    """Return the DG operators for the reference element of order N.
-
-    Parameters
-    ----------
-    N : int
-        Polynomial order.
-    r : ndarray, shape (N+1,)
-        GLL reference nodes (e.g. from legendreGL(N)).
-
-    Returns
-    -------
-    V : ndarray, shape (N+1, N+1)
-        Vandermonde matrix.
-    D : ndarray, shape (N+1, N+1)
-        Nodal differentiation matrix.  Applying D @ u_ref gives the derivative
-        of the interpolating polynomial at the reference nodes.
-    LIFT : ndarray, shape (N+1, 2)
-        Lift operator mapping two boundary flux values to N+1 nodal residuals.
-    """
-    V = Vandermonde1D(N, r)
-    D = DMatrix1D(N, r)
-    LIFT = Lift1D(N, V)
-    return V, D, LIFT
-
-
-# ---------------------------------------------------------------------------
-# Connectivity
-# ---------------------------------------------------------------------------
-
-def build_connectivity(M):
-    """Return element-to-element and element-to-face connectivity arrays.
-
-    For a 1D periodic mesh of M elements, each element has two faces:
-      face 0 = left face,  face 1 = right face.
-
-    The connectivity is:
-      Left  neighbor of element m : element (m-1) % M, face 1 (its right face)
-      Right neighbor of element m : element (m+1) % M, face 0 (its left face)
-
-    Parameters
-    ----------
-    M : int
-        Number of elements.
-
-    Returns
-    -------
-    EToE : ndarray, shape (M, 2), dtype int
-        EToE[m, f] is the index of the element neighboring element m at face f.
-    EToF : ndarray, shape (M, 2), dtype int
-        EToF[m, f] is the face index on the neighboring element EToE[m, f]
-        that is shared with element m at face f.
-    """
-    idx = np.arange(M)
-    EToE = np.stack([(idx - 1) % M, (idx + 1) % M], axis=1).astype(int)
-    EToF = np.zeros((M, 2), dtype=int)
-    EToF[:, 0] = 1  # left face's neighbor contributes its right face
-    # EToF[:, 1] = 0 already (right face's neighbor contributes its left face)
-    return EToE, EToF
+# Backward-compatible alias
+numerical_flux = burgers_godunov_flux
 
 
 def exact_sine_solution(x, t, tol=1e-13, max_iter=50):

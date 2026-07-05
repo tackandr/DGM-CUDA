@@ -15,6 +15,7 @@ from burgers1d import (
     simulate,
 )
 from dgm1d import Vandermonde1D, legendreGL
+from limiters1d import build_limiter_data
 
 
 def _mean_weights(N, r):
@@ -367,7 +368,6 @@ class TestSimulate:
         # the exact solution while cell averages remain accurate.  Nodal-value
         # comparison is fragile there and was only tight for the previous (incorrect)
         # limiter that accidentally smeared those interface values.
-        from limiters1d import build_limiter_data
         _, mw = build_limiter_data(N)
         avg_num = u @ mw
         avg_ex  = u_exact @ mw

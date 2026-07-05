@@ -25,7 +25,7 @@ from dgm1d import Vandermonde1D, legendreGL
 
 
 # ---------------------------------------------------------------------------
-# Internal quadrature order (mirrors burgers1d._quadrature_order)
+# Internal quadrature order
 # ---------------------------------------------------------------------------
 
 def _quadrature_order(N):

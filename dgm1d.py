@@ -4,12 +4,14 @@
 Provides functions to build the core operators needed for a 1D nodal DG
 discretisation on a reference element [-1, 1]:
 
-    legendreGL        -- Gauss-Lobatto-Legendre quadrature nodes
-    Vandermonde1D     -- Vandermonde matrix of normalised Legendre polynomials
-    GradVandermonde1D -- Gradient (derivative) of the Vandermonde matrix
-    DMatrix1D         -- Nodal differentiation matrix
-    Jacobian          -- Mapping Jacobian from reference to physical element
-    Lift1D            -- Lift operator for boundary flux integration
+    legendreGL         -- Gauss-Lobatto-Legendre quadrature nodes
+    Vandermonde1D      -- Vandermonde matrix of normalised Legendre polynomials
+    GradVandermonde1D  -- Gradient (1st derivative) of the Vandermonde matrix
+    Grad2Vandermonde1D -- 2nd derivative of the Vandermonde matrix
+    DMatrix1D          -- Nodal 1st-derivative differentiation matrix
+    D2Matrix1D         -- Nodal 2nd-derivative differentiation matrix
+    Jacobian           -- Mapping Jacobian from reference to physical element
+    Lift1D             -- Lift operator for boundary flux integration
 """
 
 import numpy as np
@@ -95,6 +97,59 @@ def GradVandermonde1D(N, r):
     # Vr[i, j] = derivs[1, j, i] * norm[j]
     Vr = (derivs[1] * norm[:, np.newaxis]).T
     return Vr
+
+
+def Grad2Vandermonde1D(N, r):
+    """Return the second-derivative Vandermonde matrix for degree-N polynomials.
+
+    Entry Vr2[i, j] = P_j''(r_i) * sqrt((2j+1)/2), the second derivative of
+    the normalised Legendre polynomial of degree j evaluated at node r_i.
+
+    Parameters
+    ----------
+    N : int
+        Polynomial order; the matrix has N+1 columns (degrees 0 … N).
+    r : array_like, shape (N+1,)
+        Evaluation nodes.
+
+    Returns
+    -------
+    Vr2 : ndarray, shape (len(r), N+1)
+        Second-derivative Vandermonde matrix.
+    """
+    r = np.asarray(r, dtype=float)
+    # legendre_p_all with diff_n=2 returns shape (3, N+1, len(r))
+    # index [0] = values, index [1] = first derivatives, index [2] = second derivatives
+    derivs = sps.legendre_p_all(N, r, diff_n=2)  # shape (3, N+1, len(r))
+    norm = np.sqrt((2 * np.arange(N + 1) + 1) / 2.0)  # shape (N+1,)
+    # Vr2[i, j] = derivs[2, j, i] * norm[j]
+    Vr2 = (derivs[2] * norm[:, np.newaxis]).T
+    return Vr2
+
+
+def D2Matrix1D(N, r):
+    """Return the nodal second-derivative matrix for the Nth order reference element.
+
+    Computes the second-derivative operator from the second-derivative and value
+    Vandermonde matrices evaluated at the supplied nodes.  Applying D2 to a
+    vector of nodal values gives the second derivative of the interpolating
+    polynomial at those nodes: D2 = Vr2 @ inv(V).
+
+    Parameters
+    ----------
+    N : int
+        Polynomial order.
+    r : array_like, shape (N+1,)
+        GLL nodes (e.g. from legendreGL(N)).
+
+    Returns
+    -------
+    D2 : ndarray, shape (N+1, N+1)
+        Second-derivative differentiation matrix.
+    """
+    V = Vandermonde1D(N, r)
+    Vr2 = Grad2Vandermonde1D(N, r)
+    return LA.solve(V.T, Vr2.T).T
 
 
 def DMatrix1D(N, r):
