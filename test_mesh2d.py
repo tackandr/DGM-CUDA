@@ -113,10 +113,13 @@ def _bell_gradient_error(N, nx, ny):
 
 
 def test_gradient_operators_bell_curve_error_decreases_with_refinement():
+    expected_factor = 4.0
+    max_refined_error = 0.08
+
     coarse_x, coarse_y = _bell_gradient_error(N=3, nx=4, ny=4)
     fine_x, fine_y = _bell_gradient_error(N=3, nx=8, ny=8)
 
-    assert fine_x < coarse_x / 4.0
-    assert fine_y < coarse_y / 4.0
-    assert fine_x < 0.08
-    assert fine_y < 0.08
+    assert fine_x < coarse_x / expected_factor
+    assert fine_y < coarse_y / expected_factor
+    assert fine_x < max_refined_error
+    assert fine_y < max_refined_error
