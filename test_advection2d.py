@@ -127,13 +127,16 @@ def test_x_only_advection_central_flux_bounded():
         N=N, nx=nx, ny=ny, t_final=t_final, ax=1.0, ay=0.0,
         cfl=0.1, periodic=True, u_init=u_init, flux_type="central",
     )
+    assert np.isclose(data["VX"].min(), 0.0)
+    assert np.isclose(data["VX"].max(), 1.0)
     u_exact = -np.sin(2 * np.pi * data["x"])
 
     l2_init = np.sqrt(np.mean(np.sin(2 * np.pi * data["x"]) ** 2))
     l2_err = np.sqrt(np.mean((u - u_exact) ** 2))
-    assert l2_err / l2_init < 1.0, (
+    assert l2_err / l2_init < 0.5, (
         f"x-only central advection unstable: relative L2 error = {l2_err/l2_init:.3f}"
     )
+    assert np.max(np.abs(u)) < 1.5
 
 
 def test_semidiscrete_rhs_error_reduces_with_refinement():
