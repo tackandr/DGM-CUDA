@@ -78,7 +78,7 @@ def test_x_only_advection_stable():
     )
     u_exact = -np.sin(2 * np.pi * data["x"])
 
-    l2_init = np.sqrt(np.mean(np.sin(2 * np.pi * data["x"]) ** 2))
+    l2_init = np.sqrt(np.mean(u_init(data["x"], data["y"]) ** 2))
     l2_err = np.sqrt(np.mean((u - u_exact) ** 2))
     # Solution should not blow up: error relative to the initial norm < 1
     assert l2_err / l2_init < 1.0, (
