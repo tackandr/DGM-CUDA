@@ -87,7 +87,9 @@ def advection_rhs(
         elif flux_type == "central":
             flux = central_flux(uM, uP, an)
         else:
-            raise ValueError("Unsupported flux_type")
+            raise ValueError(
+                f"Unsupported flux_type '{flux_type}'. Supported types: 'upwind', 'central'."
+            )
         face_flux_term[:, sl] = Fscale[:, sl] * (flux - an * uM)
 
     rhs -= (LIFT @ face_flux_term.T).T
