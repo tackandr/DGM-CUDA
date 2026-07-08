@@ -161,3 +161,50 @@ def test_semidiscrete_rhs_error_reduces_with_refinement():
         errs.append(err)
 
     assert errs[1] < errs[0]
+
+
+def test_circle_advection_bound_preserving_limiter_reduces_edge_oscillations():
+    N = 2
+    nx, ny = 24, 24
+    t_final = 0.3
+    ax, ay = 1.0, 0.5
+
+    x0, y0 = 0.35, 0.45
+    radius = 0.15
+
+    def u_init(x, y):
+        return (((x - x0) ** 2 + (y - y0) ** 2) <= radius**2).astype(float)
+
+    _, u_unlimited, _ = simulate_advection_2d(
+        N=N,
+        nx=nx,
+        ny=ny,
+        t_final=t_final,
+        ax=ax,
+        ay=ay,
+        cfl=0.1,
+        periodic=True,
+        u_init=u_init,
+        limiter_type=None,
+    )
+    data, u_limited, _ = simulate_advection_2d(
+        N=N,
+        nx=nx,
+        ny=ny,
+        t_final=t_final,
+        ax=ax,
+        ay=ay,
+        cfl=0.1,
+        periodic=True,
+        u_init=u_init,
+        limiter_type="bound_preserving",
+    )
+
+    assert (np.min(u_unlimited) < -0.05) or (np.max(u_unlimited) > 1.05)
+    assert np.min(u_limited) >= -1e-6
+    assert np.max(u_limited) <= 1.0 + 1e-6
+    assert np.max(u_limited) >= 0.8
+
+    initial_mass = np.mean(u_init(data["x"], data["y"]))
+    limited_mass = np.mean(u_limited)
+    assert abs(limited_mass - initial_mass) < 5e-4

@@ -7,6 +7,7 @@ Equation:
 
 import numpy as np
 
+from dgm2d import Vandermonde2D
 from mesh2d import setup_2d
 
 
@@ -112,6 +113,67 @@ def _stable_dt(ax, ay, Fscale, N, cfl):
     return cfl / (speed_n * scale * (N + 1) ** 2)
 
 
+def _triangle_mean_weights(N, r, s):
+    """Return nodal weights that produce per-element cell averages."""
+    q_order = max(2 * N + 4, 12)
+    xg, wg = np.polynomial.legendre.leggauss(q_order)
+    yg, vg = np.polynomial.legendre.leggauss(q_order)
+
+    xi = 0.5 * (xg + 1.0)
+    wx = 0.5 * wg
+    eta_ref = 0.5 * (yg + 1.0)
+    wy_ref = 0.5 * vg
+
+    rq = []
+    sq = []
+    wq = []
+    for ix, x in enumerate(xi):
+        eta = (1.0 - x) * eta_ref
+        wy = (1.0 - x) * wy_ref
+        for iy, y in enumerate(eta):
+            rq.append(2.0 * x - 1.0)
+            sq.append(2.0 * y - 1.0)
+            wq.append(wx[ix] * wy[iy] * 4.0)
+
+    rq = np.asarray(rq)
+    sq = np.asarray(sq)
+    wq = np.asarray(wq)
+
+    V = Vandermonde2D(N, r, s)
+    Vq = Vandermonde2D(N, rq, sq)
+    interp = Vq @ np.linalg.solve(V, np.eye(V.shape[0]))
+
+    # Reference triangle area is 2.
+    return 0.5 * (wq @ interp)
+
+
+def bound_preserving_limiter_2d(u, EToE, mean_weights, tol=1e-12):
+    """Apply a Zhang-Shu-style scaling limiter using neighbor cell-average bounds."""
+    cell_average = u @ mean_weights
+    neigh_average = cell_average[EToE]
+    lower = np.minimum(cell_average, np.min(neigh_average, axis=1))
+    upper = np.maximum(cell_average, np.max(neigh_average, axis=1))
+
+    umin = np.min(u, axis=1)
+    umax = np.max(u, axis=1)
+    theta = np.ones_like(cell_average)
+    eps = 1e-14
+
+    over = umax > upper + tol
+    theta[over] = np.minimum(
+        theta[over],
+        (upper[over] - cell_average[over]) / np.maximum(umax[over] - cell_average[over], eps),
+    )
+    under = umin < lower - tol
+    theta[under] = np.minimum(
+        theta[under],
+        (cell_average[under] - lower[under]) / np.maximum(cell_average[under] - umin[under], eps),
+    )
+
+    theta = np.clip(theta, 0.0, 1.0)
+    return cell_average[:, np.newaxis] + theta[:, np.newaxis] * (u - cell_average[:, np.newaxis])
+
+
 def simulate_advection_2d(
     N,
     nx,
@@ -123,6 +185,7 @@ def simulate_advection_2d(
     periodic=True,
     u_init=None,
     flux_type="upwind",
+    limiter_type=None,
 ):
     """Run a 2D advection simulation on a uniform triangular mesh."""
     data = setup_2d(N, nx, ny, periodic=periodic)
@@ -159,12 +222,22 @@ def simulate_advection_2d(
 
     t = 0.0
     dt0 = _stable_dt(ax, ay, data["Fscale"], N, cfl)
+    if limiter_type is None:
+        mean_weights = None
+    elif limiter_type == "bound_preserving":
+        mean_weights = _triangle_mean_weights(N, data["r"], data["s"])
+    else:
+        raise ValueError(
+            f"Unsupported limiter_type '{limiter_type}'. Supported types: None, 'bound_preserving'."
+        )
 
     while t < t_final:
         dt = min(dt0, t_final - t)
         if dt <= 0:
             break
         u = rk4_step_advection(u, dt, rhs)
+        if limiter_type == "bound_preserving":
+            u = bound_preserving_limiter_2d(u, data["EToE"], mean_weights)
         t += dt
 
     return data, u, t
