@@ -6,7 +6,7 @@ from advection2d import advection_rhs, simulate_advection_2d
 from mesh2d import setup_2d
 
 
-def _rhs_with_data(u, data, ax=1.0, ay=0.4, bc_type="periodic"):
+def _rhs_with_data(u, data, ax=1.0, ay=0.4, bc_type="periodic", flux_type="upwind"):
     return advection_rhs(
         u,
         ax,
@@ -26,6 +26,7 @@ def _rhs_with_data(u, data, ax=1.0, ay=0.4, bc_type="periodic"):
         data["EToF"],
         data["fmask"],
         bc_type=bc_type,
+        flux_type=flux_type,
     )
 
 
@@ -111,6 +112,27 @@ def test_y_only_advection_stable():
     # Solution should not blow up: error relative to the initial norm < 1
     assert l2_err / l2_init < 1.0, (
         f"y-only advection unstable: relative L2 error = {l2_err/l2_init:.3f}"
+    )
+
+
+def test_x_only_advection_central_flux_bounded():
+    N = 2
+    nx, ny = 4, 4
+    t_final = 0.5
+
+    def u_init(x, y):
+        return np.sin(2 * np.pi * x)
+
+    data, u, t = simulate_advection_2d(
+        N=N, nx=nx, ny=ny, t_final=t_final, ax=1.0, ay=0.0,
+        cfl=0.1, periodic=True, u_init=u_init, flux_type="central",
+    )
+    u_exact = -np.sin(2 * np.pi * data["x"])
+
+    l2_init = np.sqrt(np.mean(np.sin(2 * np.pi * data["x"]) ** 2))
+    l2_err = np.sqrt(np.mean((u - u_exact) ** 2))
+    assert l2_err / l2_init < 1.0, (
+        f"x-only central advection unstable: relative L2 error = {l2_err/l2_init:.3f}"
     )
 
 

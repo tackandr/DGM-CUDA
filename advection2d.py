@@ -15,6 +15,11 @@ def upwind_flux(u_minus, u_plus, an):
     return 0.5 * (an * (u_minus + u_plus) - np.abs(an) * (u_plus - u_minus))
 
 
+def central_flux(u_minus, u_plus, an):
+    """Scalar central numerical flux for normal speed an."""
+    return 0.5 * an * (u_minus + u_plus)
+
+
 def advection_rhs(
     u,
     ax,
@@ -35,6 +40,7 @@ def advection_rhs(
     fmask,
     bc_type="periodic",
     u_bc=None,
+    flux_type="upwind",
 ):
     """Return DG residual for 2D linear advection."""
     K, Np = u.shape
@@ -76,10 +82,15 @@ def advection_rhs(
                 # Opposite orientation across a shared edge for CCW triangles
                 uP[k] = u[kn, fmask[fn][::-1]]
 
-        flux = upwind_flux(uM, uP, an)
+        if flux_type == "upwind":
+            flux = upwind_flux(uM, uP, an)
+        elif flux_type == "central":
+            flux = central_flux(uM, uP, an)
+        else:
+            raise ValueError("Unsupported flux_type")
         face_flux_term[:, sl] = Fscale[:, sl] * (flux - an * uM)
 
-    rhs += (LIFT @ face_flux_term.T).T
+    rhs -= (LIFT @ face_flux_term.T).T
     return rhs
 
 
@@ -109,6 +120,7 @@ def simulate_advection_2d(
     cfl=0.25,
     periodic=True,
     u_init=None,
+    flux_type="upwind",
 ):
     """Run a 2D advection simulation on a uniform triangular mesh."""
     data = setup_2d(N, nx, ny, periodic=periodic)
@@ -140,6 +152,7 @@ def simulate_advection_2d(
             data["EToF"],
             data["fmask"],
             bc_type="periodic" if periodic else "transmissive",
+            flux_type=flux_type,
         )
 
     t = 0.0
