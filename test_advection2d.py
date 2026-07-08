@@ -210,3 +210,80 @@ def test_bound_preserving_limiter_suppresses_circle_edge_oscillations():
     initial_mass = np.mean(u_init(data["x"], data["y"]))
     limited_mass = np.mean(u_limited)
     assert abs(limited_mass - initial_mass) < 5e-4
+
+
+def test_minmod_limiter_suppresses_circle_edge_oscillations():
+    """Minmod TVD limiter should bound the solution in [0, 1] for a circle IC.
+
+    The minmod phi function scales nodal deviations so they do not exceed the
+    maximum inter-cell average difference, ensuring no under- or overshoots.
+    """
+    N = 2
+    nx, ny = 24, 24
+    t_final = 0.3
+    ax, ay = 1.0, 0.5
+    x0, y0, radius = 0.35, 0.45, 0.15
+    physical_tol = 1e-6
+
+    def u_init(x, y):
+        return (((x - x0) ** 2 + (y - y0) ** 2) <= radius**2).astype(float)
+
+    data, u, t = simulate_advection_2d(
+        N=N,
+        nx=nx,
+        ny=ny,
+        t_final=t_final,
+        ax=ax,
+        ay=ay,
+        cfl=0.1,
+        periodic=True,
+        u_init=u_init,
+        limiter_type="minmod",
+    )
+
+    assert np.min(u) >= -physical_tol, f"Minmod undershoot: {np.min(u):.4f}"
+    assert np.max(u) <= 1.0 + physical_tol, f"Minmod overshoot: {np.max(u):.4f}"
+    assert np.max(u) >= 0.8, "Minmod excessively diffused circle peak"
+
+    initial_mass = np.mean(u_init(data["x"], data["y"]))
+    assert abs(np.mean(u) - initial_mass) < 5e-4, "Minmod mass not conserved"
+
+
+def test_superbee_less_diffusive_than_minmod_for_circle():
+    """Superbee TVD limiter should be less diffusive than minmod on a circle IC.
+
+    Superbee's phi function allows deviations up to twice the inter-cell
+    difference before activating, so it preserves more of the peak value and
+    gives a lower L1 error against the exact advected circle.
+    """
+    N = 2
+    nx, ny = 24, 24
+    t_final = 0.3
+    ax, ay = 1.0, 0.5
+    x0, y0, radius = 0.35, 0.45, 0.15
+
+    def u_init(x, y):
+        return (((x - x0) ** 2 + (y - y0) ** 2) <= radius**2).astype(float)
+
+    def circle_exact(x, y, t):
+        xs = ((x - ax * t) % 1.0)
+        ys = ((y - ay * t) % 1.0)
+        return (((xs - x0) ** 2 + (ys - y0) ** 2) <= radius**2).astype(float)
+
+    common = dict(N=N, nx=nx, ny=ny, t_final=t_final, ax=ax, ay=ay,
+                  cfl=0.1, periodic=True, u_init=u_init)
+
+    data_mm, u_mm, t_mm = simulate_advection_2d(**common, limiter_type="minmod")
+    _,       u_sb, t_sb = simulate_advection_2d(**common, limiter_type="superbee")
+
+    uex_mm = circle_exact(data_mm["x"], data_mm["y"], t_mm)
+    l1_mm = np.mean(np.abs(u_mm - uex_mm))
+    l1_sb = np.mean(np.abs(u_sb - uex_mm))
+
+    assert np.max(u_sb) > np.max(u_mm), (
+        f"Superbee peak {np.max(u_sb):.4f} should exceed minmod peak {np.max(u_mm):.4f}"
+    )
+    assert l1_sb < l1_mm, (
+        f"Superbee L1 {l1_sb:.5f} should be smaller than minmod L1 {l1_mm:.5f}"
+    )
+
