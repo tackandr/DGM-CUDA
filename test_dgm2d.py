@@ -3,6 +3,7 @@
 import numpy as np
 from numpy import linalg as LA
 
+from dgm1d import legendreGL
 from dgm2d import (
     num_nodes_2d,
     simplex_nodes_2d,
@@ -93,3 +94,33 @@ def test_grad_modal_matches_fd():
 
     np.testing.assert_allclose(Br, Br_fd, atol=5e-7)
     np.testing.assert_allclose(Bs, Bs_fd, atol=5e-7)
+
+
+def test_face_nodes_match_gll_distribution():
+    """All three simplex faces carry the 1D GLL node distribution.
+
+    For each order N and each of the three reference-triangle faces the
+    sorted node coordinates (r on F0, s on F1 and F2) must equal the output
+    of ``legendreGL(N)`` to machine precision.
+    """
+    for N in range(2, 7):
+        r, s = simplex_nodes_2d(N)
+        fmask = face_mask_2d(N, r, s)
+        gll = legendreGL(N)
+
+        # Face F0 (s = -1, from v0 to v1): r-coordinates should match GLL
+        np.testing.assert_allclose(
+            np.sort(r[fmask[0]]), gll, atol=1e-12,
+            err_msg=f"N={N}: face F0 r-coords do not match GLL",
+        )
+        # Face F1 (r + s = 0, from v1 to v2): s-coordinates should match GLL
+        np.testing.assert_allclose(
+            np.sort(s[fmask[1]]), gll, atol=1e-12,
+            err_msg=f"N={N}: face F1 s-coords do not match GLL",
+        )
+        # Face F2 (r = -1, from v2 to v0): s-coordinates are -gll reversed,
+        # so their sorted values also equal GLL by symmetry
+        np.testing.assert_allclose(
+            np.sort(s[fmask[2]]), gll, atol=1e-12,
+            err_msg=f"N={N}: face F2 s-coords do not match GLL",
+        )

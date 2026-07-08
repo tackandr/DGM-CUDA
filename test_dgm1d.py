@@ -58,6 +58,19 @@ class TestLegendreGL:
         r = legendreGL(1)
         assert r == pytest.approx([-1.0, 1.0])
 
+    def test_interior_are_roots_of_dPn(self):
+        """Interior GLL nodes are roots of d/dx P_N(x)."""
+        import scipy.special as sps
+        for N in range(2, 8):
+            r = legendreGL(N)
+            interior = r[1:-1]
+            derivs = sps.legendre_p_all(N, interior, diff_n=1)
+            dPN = derivs[1, N, :]
+            np.testing.assert_allclose(
+                dPN, 0.0, atol=1e-10,
+                err_msg=f"Interior GLL nodes for N={N} are not roots of P'_N",
+            )
+
 
 # ---------------------------------------------------------------------------
 # Vandermonde1D

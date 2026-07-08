@@ -19,7 +19,7 @@ from functools import lru_cache
 import numpy as np
 from numpy import linalg as LA
 
-from dgm1d import Vandermonde1D
+from dgm1d import Vandermonde1D, legendreGL
 
 
 def num_nodes_2d(N):
@@ -37,31 +37,107 @@ def monomial_powers_2d(N):
     return powers
 
 
+def _warp_lagrange(N, t):
+    """Lagrange-interpolated displacement from equispaced to GLL nodes at t.
+
+    Evaluates the degree-N polynomial that interpolates (gll_i - eq_i) at
+    the N+1 equispaced nodes eq_i = -1 + 2*i/N on [-1, 1], where gll_i are
+    the corresponding GLL nodes.  The result is the "un-normalised" warp
+    from H&W Section 6.3 used by the warp/blend simplex node construction.
+
+    Parameters
+    ----------
+    N : int
+        Polynomial order.
+    t : array_like
+        Evaluation positions.
+
+    Returns
+    -------
+    warp : ndarray, same shape as t
+        Displacement values.
+    """
+    gll = legendreGL(N)
+    eq = np.linspace(-1.0, 1.0, N + 1)
+    delta = gll - eq  # vanishes at both endpoints
+
+    t = np.asarray(t, dtype=float).ravel()
+    warp = np.zeros(len(t))
+    for i in range(N + 1):
+        li = np.ones(len(t))
+        for j in range(N + 1):
+            if i != j:
+                li *= (t - eq[j]) / (eq[i] - eq[j])
+        warp += delta[i] * li
+    return warp
+
+
 def simplex_nodes_2d(N):
     """Return order-N nodal points on the reference triangle.
 
-    Uses the simplex lattice nodes in barycentric coordinates, mapped to
-    reference (r,s) with vertices (-1,-1), (1,-1), (-1,1).
+    Uses a warp/blend construction (Hesthaven & Warburton, Sec. 6.3): starts
+    from equispaced barycentric lattice nodes and applies a smooth warp so
+    that all three edges carry the 1D Gauss-Lobatto-Legendre (GLL) node
+    distribution matching ``legendreGL(N)``.
+
+    Reference triangle has vertices v0=(-1,-1), v1=(1,-1), v2=(-1,1).
+
+    Face labelling (same as ``face_mask_2d``):
+      F0 (L2=0, s=-1)  : from v0 to v1, tangential parameter t = L1 - L0
+      F1 (L0=0, r+s=0) : from v1 to v2, tangential parameter t = L2 - L1
+      F2 (L1=0, r=-1)  : from v2 to v0, tangential parameter t = L0 - L2
     """
     if N < 0:
         raise ValueError("N must be non-negative")
     if N == 0:
         return np.array([-1.0]), np.array([-1.0])
 
-    r = []
-    s = []
+    # Equispaced barycentric nodes
+    L0_list, L1_list, L2_list = [], [], []
     for i in range(N + 1):
         for j in range(N + 1 - i):
-            # barycentric weights for vertices v0(-1,-1), v1(1,-1), v2(-1,1)
             l1 = i / N
             l2 = j / N
             l0 = 1.0 - l1 - l2
-            rr = -l0 + l1 - l2
-            ss = -l0 - l1 + l2
-            r.append(rr)
-            s.append(ss)
+            L0_list.append(l0)
+            L1_list.append(l1)
+            L2_list.append(l2)
 
-    return np.asarray(r, dtype=float), np.asarray(s, dtype=float)
+    L0 = np.asarray(L0_list)
+    L1 = np.asarray(L1_list)
+    L2 = np.asarray(L2_list)
+
+    # Equispaced reference coordinates
+    r0 = -L0 + L1 - L2
+    s0 = -L0 - L1 + L2
+
+    # Tangential parameters along each face
+    t_F0 = L1 - L0
+    t_F1 = L2 - L1
+    t_F2 = L0 - L2
+
+    # Blending factors: equal to (1 - t^2) when a node lies exactly on face k
+    blend_F0 = 4.0 * L0 * L1
+    blend_F1 = 4.0 * L1 * L2
+    blend_F2 = 4.0 * L0 * L2
+
+    # Normalised warp: warp_unnorm / (1 - t^2).
+    # At vertices |t|=1 the blend is zero so the singularity is removable;
+    # we safely return 0 there.
+    def _warp_norm(t_arr):
+        t_arr = np.asarray(t_arr)
+        w = _warp_lagrange(N, t_arr)
+        denom = 1.0 - t_arr ** 2
+        safe = np.abs(t_arr) < 1.0 - 1e-10
+        return np.where(safe, w / np.where(safe, denom, 1.0), 0.0)
+
+    W0 = blend_F0 * _warp_norm(t_F0)
+    W1 = blend_F1 * _warp_norm(t_F1)
+    W2 = blend_F2 * _warp_norm(t_F2)
+
+    # (r, s) displacement contributed by each face:
+    #   F0 -> (+W0, 0), F1 -> (-W1, +W1), F2 -> (0, -W2)
+    return r0 + W0 - W1, s0 + W1 - W2
 
 
 def _monomial_values(r, s, powers):

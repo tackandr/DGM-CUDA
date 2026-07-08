@@ -23,9 +23,9 @@ def legendreGL(N):
     """Return the N+1 Gauss-Lobatto-Legendre (GLL) nodes of order N.
 
     The GLL nodes consist of the two endpoints ±1 together with the N-1
-    interior Gauss-Legendre nodes of order N-1, giving N+1 nodes in total.
-    These nodes make the Vandermonde matrix square and invertible for degree-N
-    polynomial approximation.
+    interior nodes that are the roots of P'_N(x), the derivative of the
+    Legendre polynomial of degree N.  Equivalently, the interior roots are
+    the zeros of the Jacobi polynomial P_{N-1}^{(1,1)}(x).
 
     Parameters
     ----------
@@ -39,8 +39,9 @@ def legendreGL(N):
     """
     if N == 1:
         return np.array([-1.0, 1.0])
-    r_interior, _ = np.polynomial.legendre.leggauss(N - 1)
-    return np.concatenate([[-1.0], r_interior, [1.0]])
+    # Interior GLL nodes are the roots of P'_N(x) ∝ P_{N-1}^{(1,1)}(x)
+    x_int, _ = sps.roots_jacobi(N - 1, 1.0, 1.0)
+    return np.concatenate([[-1.0], np.sort(x_int), [1.0]])
 
 
 def Vandermonde1D(N, r):
