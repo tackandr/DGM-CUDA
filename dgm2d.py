@@ -213,7 +213,7 @@ def _orthonormal_transform_2d(N):
     G = 0.5 * (G + G.T)
 
     L = LA.cholesky(G)
-    C = LA.solve(L, np.eye(L.shape[0]))
+    C = LA.solve(L.T, np.eye(L.shape[0]))
     return powers, C
 
 

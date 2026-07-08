@@ -93,12 +93,10 @@ def build_connectivity_2d(EToV, VX, VY, periodic=False, domain=None, tol=1e-12):
     for k in range(K):
         for f in range(Nfaces):
             va, vb = face_verts[k, f]
-            xa, ya = _canon_point(VX[va], VY[va], periodic, domain, tol)
-            xb, yb = _canon_point(VX[vb], VY[vb], periodic, domain, tol)
-
-            p1 = (round(xa, 12), round(ya, 12))
-            p2 = (round(xb, 12), round(yb, 12))
-            key = tuple(sorted((p1, p2)))
+            xm = 0.5 * (VX[va] + VX[vb])
+            ym = 0.5 * (VY[va] + VY[vb])
+            xm_c, ym_c = _canon_point(xm, ym, periodic, domain, tol)
+            key = (round(xm_c, 12), round(ym_c, 12))
 
             if key in edge_map:
                 k2, f2 = edge_map.pop(key)

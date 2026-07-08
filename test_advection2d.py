@@ -56,6 +56,64 @@ def test_simulate_returns_expected_shapes_and_time():
     assert t == tfinal
 
 
+def test_x_only_advection_stable():
+    """X-only advection (ax=1, ay=0) with periodic IC should stay bounded at t=0.5.
+
+    After t=0.5 the sine wave should have shifted half a period, so the
+    solution should be close to the *negative* of the initial condition
+    (sin(2π(x-0.5)) = -sin(2πx)).  This test isolates any instability that
+    arises purely from x-direction advection.
+    """
+    N = 2
+    nx, ny = 4, 4
+    t_final = 0.5
+
+    def u_init(x, y):
+        return np.sin(2 * np.pi * x)
+
+    data, u, t = simulate_advection_2d(
+        N=N, nx=nx, ny=ny, t_final=t_final, ax=1.0, ay=0.0,
+        cfl=0.1, periodic=True, u_init=u_init,
+    )
+    u_exact = -np.sin(2 * np.pi * data["x"])
+
+    l2_init = np.sqrt(np.mean(np.sin(2 * np.pi * data["x"]) ** 2))
+    l2_err = np.sqrt(np.mean((u - u_exact) ** 2))
+    # Solution should not blow up: error relative to the initial norm < 1
+    assert l2_err / l2_init < 1.0, (
+        f"x-only advection unstable: relative L2 error = {l2_err/l2_init:.3f}"
+    )
+
+
+def test_y_only_advection_stable():
+    """Y-only advection (ax=0, ay=1) with periodic IC should stay bounded at t=0.5.
+
+    After t=0.5 the sine wave should have shifted half a period, so the
+    solution should be close to the *negative* of the initial condition
+    (sin(2π(y-0.5)) = -sin(2πy)).  This test isolates any instability that
+    arises purely from y-direction advection.
+    """
+    N = 2
+    nx, ny = 4, 4
+    t_final = 0.5
+
+    def u_init(x, y):
+        return np.sin(2 * np.pi * y)
+
+    data, u, t = simulate_advection_2d(
+        N=N, nx=nx, ny=ny, t_final=t_final, ax=0.0, ay=1.0,
+        cfl=0.1, periodic=True, u_init=u_init,
+    )
+    u_exact = -np.sin(2 * np.pi * data["y"])
+
+    l2_init = np.sqrt(np.mean(np.sin(2 * np.pi * data["y"]) ** 2))
+    l2_err = np.sqrt(np.mean((u - u_exact) ** 2))
+    # Solution should not blow up: error relative to the initial norm < 1
+    assert l2_err / l2_init < 1.0, (
+        f"y-only advection unstable: relative L2 error = {l2_err/l2_init:.3f}"
+    )
+
+
 def test_semidiscrete_rhs_error_reduces_with_refinement():
     N = 2
     ax, ay = 0.7, 0.4
