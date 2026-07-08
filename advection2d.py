@@ -5,10 +5,15 @@ Equation:
     u_t + a_x u_x + a_y u_y = 0
 """
 
+from functools import lru_cache
+
 import numpy as np
 
-from dgm2d import Vandermonde2D
+from dgm2d import Vandermonde2D, simplex_nodes_2d
 from mesh2d import setup_2d
+
+# Small fraction of limiter tolerance used to regularize denominator divisions.
+EPS_TOL_RATIO = 0.01
 
 
 def upwind_flux(u_minus, u_plus, an):
@@ -113,14 +118,18 @@ def _stable_dt(ax, ay, Fscale, N, cfl):
     return cfl / (speed_n * scale * (N + 1) ** 2)
 
 
-def _triangle_mean_weights(N, r, s):
+@lru_cache(maxsize=16)
+def _triangle_mean_weights(N):
     """Return nodal weights that produce per-element cell averages."""
+    # Use an over-integrating quadrature to accurately recover mean weights for
+    # curved nodal distributions across practical DG orders.
     q_order = max(2 * N + 4, 12)
+    r, s = simplex_nodes_2d(N)
     xg, wg = np.polynomial.legendre.leggauss(q_order)
     yg, vg = np.polynomial.legendre.leggauss(q_order)
 
     xi = 0.5 * (xg + 1.0)
-    wx = 0.5 * wg
+    wx_ref = 0.5 * wg
     eta_ref = 0.5 * (yg + 1.0)
     wy_ref = 0.5 * vg
 
@@ -133,7 +142,7 @@ def _triangle_mean_weights(N, r, s):
         for iy, y in enumerate(eta):
             rq.append(2.0 * x - 1.0)
             sq.append(2.0 * y - 1.0)
-            wq.append(wx[ix] * wy[iy] * 4.0)
+            wq.append(wx_ref[ix] * wy[iy] * 4.0)
 
     rq = np.asarray(rq)
     sq = np.asarray(sq)
@@ -157,7 +166,8 @@ def bound_preserving_limiter_2d(u, EToE, mean_weights, tol=1e-12):
     umin = np.min(u, axis=1)
     umax = np.max(u, axis=1)
     theta = np.ones_like(cell_average)
-    eps = 1e-14
+    # Keep the denominator strictly positive while tying epsilon to tol scale.
+    eps = max(1e-14, EPS_TOL_RATIO * tol)
 
     over = umax > upper + tol
     theta[over] = np.minimum(
@@ -225,7 +235,7 @@ def simulate_advection_2d(
     if limiter_type is None:
         mean_weights = None
     elif limiter_type == "bound_preserving":
-        mean_weights = _triangle_mean_weights(N, data["r"], data["s"])
+        mean_weights = _triangle_mean_weights(N)
     else:
         raise ValueError(
             f"Unsupported limiter_type '{limiter_type}'. Supported types: None, 'bound_preserving'."

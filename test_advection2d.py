@@ -163,7 +163,7 @@ def test_semidiscrete_rhs_error_reduces_with_refinement():
     assert errs[1] < errs[0]
 
 
-def test_circle_advection_bound_preserving_limiter_reduces_edge_oscillations():
+def test_bound_preserving_limiter_suppresses_circle_edge_oscillations():
     N = 2
     nx, ny = 24, 24
     t_final = 0.3
@@ -171,6 +171,8 @@ def test_circle_advection_bound_preserving_limiter_reduces_edge_oscillations():
 
     x0, y0 = 0.35, 0.45
     radius = 0.15
+    oscillation_tol = 0.05
+    physical_tol = 1e-6
 
     def u_init(x, y):
         return (((x - x0) ** 2 + (y - y0) ** 2) <= radius**2).astype(float)
@@ -200,9 +202,9 @@ def test_circle_advection_bound_preserving_limiter_reduces_edge_oscillations():
         limiter_type="bound_preserving",
     )
 
-    assert (np.min(u_unlimited) < -0.05) or (np.max(u_unlimited) > 1.05)
-    assert np.min(u_limited) >= -1e-6
-    assert np.max(u_limited) <= 1.0 + 1e-6
+    assert (np.min(u_unlimited) < -oscillation_tol) or (np.max(u_unlimited) > 1.0 + oscillation_tol)
+    assert np.min(u_limited) >= -physical_tol
+    assert np.max(u_limited) <= 1.0 + physical_tol
     assert np.max(u_limited) >= 0.8
 
     initial_mass = np.mean(u_init(data["x"], data["y"]))
