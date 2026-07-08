@@ -270,15 +270,18 @@ def test_superbee_less_diffusive_than_minmod_for_circle():
         ys = ((y - ay * t) % 1.0)
         return (((xs - x0) ** 2 + (ys - y0) ** 2) <= radius**2).astype(float)
 
-    common = dict(N=N, nx=nx, ny=ny, t_final=t_final, ax=ax, ay=ay,
-                  cfl=0.1, periodic=True, u_init=u_init)
+    common = dict(
+        N=N, nx=nx, ny=ny, t_final=t_final,
+        ax=ax, ay=ay, cfl=0.1, periodic=True, u_init=u_init,
+    )
 
     data_mm, u_mm, t_mm = simulate_advection_2d(**common, limiter_type="minmod")
-    _,       u_sb, t_sb = simulate_advection_2d(**common, limiter_type="superbee")
+    data_sb, u_sb, t_sb = simulate_advection_2d(**common, limiter_type="superbee")
 
     uex_mm = circle_exact(data_mm["x"], data_mm["y"], t_mm)
+    uex_sb = circle_exact(data_sb["x"], data_sb["y"], t_sb)
     l1_mm = np.mean(np.abs(u_mm - uex_mm))
-    l1_sb = np.mean(np.abs(u_sb - uex_mm))
+    l1_sb = np.mean(np.abs(u_sb - uex_sb))
 
     assert np.max(u_sb) > np.max(u_mm), (
         f"Superbee peak {np.max(u_sb):.4f} should exceed minmod peak {np.max(u_mm):.4f}"

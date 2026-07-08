@@ -306,7 +306,7 @@ def simulate_advection_2d(
         "minmod": _phi_minmod,
         "superbee": _phi_superbee,
     }
-    _SUPPORTED = ("None", "bound_preserving", "minmod", "superbee")
+    _SUPPORTED = (None, "bound_preserving", "minmod", "superbee")
 
     if limiter_type is None:
         mean_weights = None
@@ -319,7 +319,8 @@ def simulate_advection_2d(
         phi_fn = _TVD_PHI[limiter_type]
     else:
         raise ValueError(
-            f"Unsupported limiter_type '{limiter_type}'. Supported types: {', '.join(_SUPPORTED)}."
+            f"Unsupported limiter_type '{limiter_type}'. "
+            f"Supported types: {', '.join(str(s) for s in _SUPPORTED)}."
         )
 
     while t < t_final:
