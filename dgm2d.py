@@ -123,12 +123,14 @@ def simplex_nodes_2d(N):
 
     # Normalised warp: warp_unnorm / (1 - t^2).
     # At vertices |t|=1 the blend is zero so the singularity is removable;
-    # we safely return 0 there.
+    # we safely return 0 there.  The threshold guards against round-off in t.
+    _VERTEX_TOL = 1.0 - 1e-10
+
     def _warp_norm(t_arr):
         t_arr = np.asarray(t_arr)
         w = _warp_lagrange(N, t_arr)
         denom = 1.0 - t_arr ** 2
-        safe = np.abs(t_arr) < 1.0 - 1e-10
+        safe = np.abs(t_arr) < _VERTEX_TOL
         return np.where(safe, w / np.where(safe, denom, 1.0), 0.0)
 
     W0 = blend_F0 * _warp_norm(t_F0)

@@ -64,6 +64,8 @@ class TestLegendreGL:
         for N in range(2, 8):
             r = legendreGL(N)
             interior = r[1:-1]
+            # legendre_p_all returns shape (diff_n+1, N+1, npts):
+            #   axis-0 index 1 = first derivative; axis-1 index N = degree-N poly
             derivs = sps.legendre_p_all(N, interior, diff_n=1)
             dPN = derivs[1, N, :]
             np.testing.assert_allclose(
