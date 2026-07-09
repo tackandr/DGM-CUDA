@@ -26,21 +26,21 @@ def _normalize_rows(v):
 
 
 def _base_icosahedron():
-    phi = 0.5 * (1.0 + np.sqrt(5.0))
+    golden_ratio = 0.5 * (1.0 + np.sqrt(5.0))
     vertices = np.array(
         [
-            (-1.0, phi, 0.0),
-            (1.0, phi, 0.0),
-            (-1.0, -phi, 0.0),
-            (1.0, -phi, 0.0),
-            (0.0, -1.0, phi),
-            (0.0, 1.0, phi),
-            (0.0, -1.0, -phi),
-            (0.0, 1.0, -phi),
-            (phi, 0.0, -1.0),
-            (phi, 0.0, 1.0),
-            (-phi, 0.0, -1.0),
-            (-phi, 0.0, 1.0),
+            (-1.0, golden_ratio, 0.0),
+            (1.0, golden_ratio, 0.0),
+            (-1.0, -golden_ratio, 0.0),
+            (1.0, -golden_ratio, 0.0),
+            (0.0, -1.0, golden_ratio),
+            (0.0, 1.0, golden_ratio),
+            (0.0, -1.0, -golden_ratio),
+            (0.0, 1.0, -golden_ratio),
+            (golden_ratio, 0.0, -1.0),
+            (golden_ratio, 0.0, 1.0),
+            (-golden_ratio, 0.0, -1.0),
+            (-golden_ratio, 0.0, 1.0),
         ],
         dtype=float,
     )
@@ -159,7 +159,7 @@ def build_sphere_connectivity(faces):
 def _spherical_triangle_area_unit(a, b, c):
     det = np.dot(a, np.cross(b, c))
     denom = 1.0 + np.dot(a, b) + np.dot(b, c) + np.dot(c, a)
-    return 2.0 * np.arctan2(abs(det), denom)
+    return 2.0 * np.arctan2(det, denom)
 
 
 def _great_circle_point(a, b, tau):
@@ -198,6 +198,8 @@ def build_sphere_geometry(vertices, faces, quadrature_order=6):
         center = center / np.linalg.norm(center)
         centers[k] = radius * center
         areas[k] = radius**2 * _spherical_triangle_area_unit(tri[0], tri[1], tri[2])
+        if areas[k] <= 0.0:
+            raise ValueError(f"face {k} is not outward-oriented on the sphere")
 
         for f, (i, j) in enumerate(_FACE_VERTEX_IDS):
             a = tri[i]
@@ -277,7 +279,10 @@ def build_edge_flux_integrals(geometry, wind_fn, quadrature_order=6):
             edge_flux[k, f] = radius * alpha * line_integral
 
             if np.dot(normal, centers[k]) > 1e-12:
-                raise RuntimeError("edge normal orientation is inconsistent")
+                raise RuntimeError(
+                    f"edge normal orientation is inconsistent for element {k}, face {f}: "
+                    f"dot={np.dot(normal, centers[k]):.3e}"
+                )
 
     return edge_flux
 

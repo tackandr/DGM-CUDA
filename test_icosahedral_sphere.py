@@ -55,7 +55,8 @@ def test_scalar_gaussian_advects_eastward_on_one_refinement_level():
     centers = geometry["centers"]
     lon = np.arctan2(centers[:, 1], centers[:, 0])
     lat = np.arcsin(centers[:, 2] / np.linalg.norm(centers, axis=1))
-    lon_back = ((lon - speed * t / np.maximum(np.cos(lat), 1e-12) + np.pi) % (2.0 * np.pi)) - np.pi
+    angular_displacement = speed * t / np.maximum(np.cos(lat), 1e-12)
+    lon_back = ((lon - angular_displacement + np.pi) % (2.0 * np.pi)) - np.pi
     q_exact = gaussian_from_lonlat(lon_back, lat)
     q0 = q_init(centers)
 
