@@ -1,8 +1,13 @@
 """
-2D linear advection solver on triangular DG elements.
+2D advection solver on triangular DG elements.
 
-Equation:
-    u_t + a_x u_x + a_y u_y = 0
+Two formulations are provided:
+
+Linear (constant-coefficient):
+    u_t + a_x u_x + a_y u_y = 0          (a_x, a_y scalars)
+
+Variable-coefficient (callable velocity field):
+    u_t + a_x(x,y,t) u_x + a_y(x,y,t) u_y = 0
 """
 
 from functools import lru_cache
@@ -366,6 +371,324 @@ def simulate_advection_2d(
         if dt <= 0:
             break
         u = rk4_step_advection(u, dt, rhs)
+        if limiter_type == "bound_preserving":
+            u = bound_preserving_limiter_2d(u, data["EToE"], mean_weights)
+        elif phi_fn is not None:
+            u = tvd_limiter_2d(u, data["EToE"], mean_weights, phi_fn)
+        t += dt
+
+    return data, u, t
+
+
+# ---------------------------------------------------------------------------
+# Variable-coefficient 2D advection
+# ---------------------------------------------------------------------------
+
+def advection_rhs_vc_2d(
+    u,
+    ax_field,
+    ay_field,
+    Dr,
+    Ds,
+    LIFT,
+    rx,
+    sx,
+    ry,
+    sy,
+    J,
+    nx,
+    ny,
+    Fscale,
+    EToE,
+    EToF,
+    fmask,
+    bc_type="periodic",
+    u_bc=None,
+    flux_type="upwind",
+    boundary_mask=None,
+):
+    """Return the DG residual for 2D variable-coefficient advection.
+
+    Solves the strong-form equation
+
+        u_t + a_x(x,y,t) * u_x + a_y(x,y,t) * u_y = 0
+
+    using a pre-evaluated velocity field.  This reduces to ``advection_rhs``
+    when the velocity arrays are spatially uniform (scalar broadcast).
+
+    Parameters
+    ----------
+    u : ndarray, shape (K, Np)
+        Current nodal values.
+    ax_field : ndarray, shape (K, Np)
+        x-component of the velocity field evaluated at every element node.
+    ay_field : ndarray, shape (K, Np)
+        y-component of the velocity field evaluated at every element node.
+    Dr, Ds : ndarray, shape (Np, Np)
+        Reference-element differentiation matrices in r and s directions.
+    LIFT : ndarray, shape (Np, Nfaces*Nfp)
+        Lift operator for face-to-volume flux integration.
+    rx, sx, ry, sy : ndarray, shape (K, Np)
+        Physical-to-reference metric terms (dx/dr etc.).
+    J : ndarray, shape (K, Np)
+        Jacobian of the reference-to-physical mapping.
+    nx, ny : ndarray, shape (K, Nfaces*Nfp)
+        Outward unit normals at each face quadrature node.
+    Fscale : ndarray, shape (K, Nfaces*Nfp)
+        Face-to-volume scale factor (ratio of face Jacobian to volume Jacobian).
+    EToE : ndarray, shape (K, 3), int
+        Element-to-element connectivity.
+    EToF : ndarray, shape (K, 3), int
+        Element-to-face connectivity.
+    fmask : sequence of length Nfaces
+        fmask[f] is the list of volume node indices that lie on face f.
+    bc_type : {'periodic', 'transmissive', 'dirichlet'}, optional
+        Boundary condition type (default 'periodic').
+    u_bc : ndarray, shape (K, Np) or None, optional
+        Dirichlet boundary values; required when ``bc_type='dirichlet'``.
+    flux_type : {'upwind', 'central'}, optional
+        Numerical flux type (default 'upwind').
+    boundary_mask : ndarray, shape (K, 3) bool or None, optional
+        Pre-computed mask identifying boundary faces; if None it is inferred
+        from the self-referencing entries of EToE / EToF.
+
+    Returns
+    -------
+    rhs : ndarray, shape (K, Np)
+        DG right-hand side du/dt.
+    """
+    K, Np = u.shape
+    Nfaces = 3
+    Nfp = len(fmask[0])
+
+    ur = u @ Dr.T
+    us = u @ Ds.T
+
+    ux = rx * ur + sx * us
+    uy = ry * ur + sy * us
+    rhs = -(ax_field * ux + ay_field * uy)
+
+    face_flux_term = np.zeros((K, Nfaces * Nfp), dtype=float)
+
+    # For a shared edge the neighbour indexes its face nodes in reverse order
+    # (CCW convention), so we reverse when gathering the exterior state.
+    fmask_rev = np.array([np.asarray(fmask[ff])[::-1] for ff in range(Nfaces)])
+
+    for f in range(Nfaces):
+        ids = fmask[f]
+        sl = slice(f * Nfp, (f + 1) * Nfp)
+
+        uM = u[:, ids]                          # (K, Nfp) interior state
+        nxf = nx[:, sl]                         # (K, Nfp) face normals x
+        nyf = ny[:, sl]                         # (K, Nfp) face normals y
+
+        # Normal velocity at face nodes using the local velocity field
+        ax_face = ax_field[:, ids]              # (K, Nfp)
+        ay_face = ay_field[:, ids]              # (K, Nfp)
+        an = ax_face * nxf + ay_face * nyf      # (K, Nfp)
+
+        # Vectorised exterior-state gather over all K elements.
+        kn = EToE[:, f]
+        fn = EToF[:, f]
+        neigh_nodes = fmask_rev[fn]
+        uP = u[kn[:, np.newaxis], neigh_nodes]  # (K, Nfp)
+
+        # Fix up boundary faces for non-periodic BC.
+        if bc_type != "periodic":
+            if boundary_mask is not None:
+                is_bnd = boundary_mask[:, f]
+            else:
+                is_bnd = (kn == np.arange(K)) & (fn == f)
+            bnd_k = np.where(is_bnd)[0]
+            if bnd_k.size > 0:
+                if bc_type == "transmissive":
+                    uP[bnd_k] = uM[bnd_k]
+                elif bc_type == "dirichlet":
+                    if u_bc is None:
+                        raise ValueError("u_bc must be provided for dirichlet bc")
+                    uP[bnd_k] = u_bc[np.ix_(bnd_k, ids)]
+                else:
+                    raise ValueError(
+                        f"Unsupported bc_type '{bc_type}'. "
+                        "Supported types: 'periodic', 'transmissive', 'dirichlet'."
+                    )
+
+        if flux_type == "upwind":
+            flux = upwind_flux(uM, uP, an)
+        elif flux_type == "central":
+            flux = central_flux(uM, uP, an)
+        else:
+            raise ValueError(
+                f"Unsupported flux_type '{flux_type}'. Supported types: 'upwind', 'central'."
+            )
+        face_flux_term[:, sl] = Fscale[:, sl] * (flux - an * uM)
+
+    rhs -= (LIFT @ face_flux_term.T).T
+    return rhs
+
+
+def rk4_step_advection_vc(u, t, dt, rhs_fn):
+    """Advance one classical RK4 step for a time-dependent right-hand side.
+
+    Evaluates ``rhs_fn`` at the correct intermediate times for each stage.
+
+    Parameters
+    ----------
+    u : ndarray, shape (K, Np)
+        Current nodal values.
+    t : float
+        Current time.
+    dt : float
+        Time step.
+    rhs_fn : callable(u, t) -> ndarray
+        Right-hand side returning an array with the same shape as ``u``.
+
+    Returns
+    -------
+    u_new : ndarray, shape (K, Np)
+    """
+    k1 = rhs_fn(u, t)
+    k2 = rhs_fn(u + 0.5 * dt * k1, t + 0.5 * dt)
+    k3 = rhs_fn(u + 0.5 * dt * k2, t + 0.5 * dt)
+    k4 = rhs_fn(u + dt * k3, t + dt)
+    return u + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+
+
+def simulate_advection_vc_2d(
+    N,
+    nx,
+    ny,
+    t_final,
+    velocity_x,
+    velocity_y,
+    cfl=0.25,
+    periodic=True,
+    u_init=None,
+    flux_type="upwind",
+    limiter_type=None,
+):
+    """Run a 2D variable-coefficient advection simulation on a triangular mesh.
+
+    Solves the strong-form equation
+
+        u_t + a_x(x,y,t) * u_x + a_y(x,y,t) * u_y = 0
+
+    on the unit square [0,1]^2, triangulated into 2*nx*ny right-angled
+    triangles.  Time steps are chosen adaptively via the CFL condition
+
+        dt = cfl / (max|a(x,y,t)| * max(Fscale) * (N+1)^2)
+
+    evaluated with the velocity field at the beginning of each step.
+
+    Parameters
+    ----------
+    N : int
+        Polynomial order; each element has Np = (N+1)(N+2)/2 nodes.
+    nx, ny : int
+        Number of mesh rectangles in the x and y directions;
+        total elements K = 2*nx*ny.
+    t_final : float
+        Final simulation time.
+    velocity_x : callable(x, y, t) -> ndarray
+        x-component of the velocity field.  Called with (K, Np) arrays ``x``,
+        ``y`` and scalar ``t``; must return an array of the same shape.
+    velocity_y : callable(x, y, t) -> ndarray
+        y-component of the velocity field.  Same calling convention as
+        ``velocity_x``.
+    cfl : float, optional
+        CFL number (default 0.25).
+    periodic : bool, optional
+        Use periodic boundaries (default True).  When False, transmissive
+        (outflow) boundaries are applied on all domain edges.
+    u_init : callable or None, optional
+        Initial condition u_0(x, y).  Receives (K, Np) coordinate arrays and
+        must return an array of the same shape.
+        Defaults to sin(2*pi*x)*sin(2*pi*y).
+    flux_type : {'upwind', 'central'}, optional
+        Numerical flux (default 'upwind').
+    limiter_type : {None, 'bound_preserving', 'minmod', 'superbee', 'van_leer', 'mc'}, optional
+        Limiter applied after each time step (default None).
+
+    Returns
+    -------
+    data : dict
+        Mesh and operator data returned by ``setup_2d``.
+    u : ndarray, shape (K, Np)
+        Solution at time t.
+    t : float
+        Actual final time reached.
+    """
+    data = setup_2d(N, nx, ny, periodic=periodic)
+
+    x = data["x"]
+    y = data["y"]
+    if u_init is None:
+        u_init = lambda xv, yv: np.sin(2 * np.pi * xv) * np.sin(2 * np.pi * yv)
+
+    u = np.asarray(u_init(x, y), dtype=float)
+
+    _TVD_PHI = {
+        "minmod": _phi_minmod,
+        "superbee": _phi_superbee,
+        "van_leer": _phi_van_leer,
+        "mc": _phi_mc,
+    }
+    _SUPPORTED = (None, "bound_preserving", "minmod", "superbee", "van_leer", "mc")
+
+    if limiter_type is None:
+        mean_weights = None
+        phi_fn = None
+    elif limiter_type == "bound_preserving":
+        mean_weights = _triangle_mean_weights(N)
+        phi_fn = None
+    elif limiter_type in _TVD_PHI:
+        mean_weights = _triangle_mean_weights(N)
+        phi_fn = _TVD_PHI[limiter_type]
+    else:
+        raise ValueError(
+            f"Unsupported limiter_type '{limiter_type}'. "
+            f"Supported types: {', '.join(str(s) for s in _SUPPORTED)}."
+        )
+
+    _scale = np.max(data["Fscale"])
+    _MIN_SPEED = 1e-14
+
+    def rhs(v, t_curr):
+        ax_f = np.asarray(velocity_x(x, y, t_curr), dtype=float)
+        ay_f = np.asarray(velocity_y(x, y, t_curr), dtype=float)
+        return advection_rhs_vc_2d(
+            v,
+            ax_f,
+            ay_f,
+            data["Dr"],
+            data["Ds"],
+            data["LIFT"],
+            data["rx"],
+            data["sx"],
+            data["ry"],
+            data["sy"],
+            data["J"],
+            data["nx"],
+            data["ny"],
+            data["Fscale"],
+            data["EToE"],
+            data["EToF"],
+            data["fmask"],
+            bc_type="periodic" if periodic else "transmissive",
+            flux_type=flux_type,
+            boundary_mask=data.get("boundary_mask"),
+        )
+
+    t = 0.0
+    while t < t_final:
+        ax_now = np.asarray(velocity_x(x, y, t), dtype=float)
+        ay_now = np.asarray(velocity_y(x, y, t), dtype=float)
+        max_speed = np.max(np.sqrt(ax_now ** 2 + ay_now ** 2)) + _MIN_SPEED
+        dt = cfl / (max_speed * _scale * (N + 1) ** 2)
+        dt = min(dt, t_final - t)
+        if dt <= 0:
+            break
+        u = rk4_step_advection_vc(u, t, dt, rhs)
         if limiter_type == "bound_preserving":
             u = bound_preserving_limiter_2d(u, data["EToE"], mean_weights)
         elif phi_fn is not None:
