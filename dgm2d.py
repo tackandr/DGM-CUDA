@@ -4,6 +4,9 @@
 Implements a nodal DG operator stack on the reference triangle with vertices
 (-1,-1), (1,-1), (-1,1), following the Hesthaven & Warburton simplex layout:
 
+For order-2 triangle elements this reference simplex carries 6 nodal degrees of
+freedom: the 3 triangle vertices plus 1 interior face node on each edge.
+
     simplex_nodes_2d     -- nodal points, shape (Np,), (Np,)
     modal_basis_2d       -- orthonormal modal basis at points
     grad_modal_basis_2d  -- gradients of modal basis wrt (r,s)

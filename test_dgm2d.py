@@ -24,6 +24,17 @@ def test_node_count_formula():
         assert s.shape == (num_nodes_2d(N),)
 
 
+def test_order2_simplex_triangle_nodes():
+    r, s = simplex_nodes_2d(2)
+    fmask = face_mask_2d(2, r, s)
+
+    assert num_nodes_2d(2) == 6
+    assert r.shape == (6,)
+    assert s.shape == (6,)
+    assert all(len(ids) == 3 for ids in fmask)
+    np.testing.assert_allclose(np.sort(r[fmask[0]]), legendreGL(2), atol=1e-12)
+
+
 def test_vandermonde_shape_and_invertibility():
     for N in range(1, 6):
         r, s = simplex_nodes_2d(N)

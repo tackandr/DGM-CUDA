@@ -89,6 +89,17 @@ def test_normals_unit_length_and_fscale_positive():
     assert np.all(Fscale > 0.0)
 
 
+def test_order2_simplex_triangle_setup_shapes():
+    data = setup_2d(N=2, nx=2, ny=2, periodic=True)
+
+    assert data["EToV"].shape == (8, 3)
+    assert data["x"].shape == (8, 6)
+    assert data["y"].shape == (8, 6)
+    assert data["LIFT"].shape == (6, 9)
+    assert data["boundary_mask"].shape == (8, 3)
+    assert not np.any(data["boundary_mask"])
+
+
 def _bell_gradient_error(N, nx, ny):
     data = setup_2d(N=N, nx=nx, ny=ny, periodic=True)
     x = data["x"]
