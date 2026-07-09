@@ -216,6 +216,28 @@ def _phi_superbee(r):
     return np.maximum(0.0, np.maximum(np.minimum(2.0 * r, 1.0), np.minimum(r, 2.0)))
 
 
+def _phi_van_leer(r):
+    """Van Leer flux-limiter function: φ(r) = (r + |r|) / (1 + |r|).
+
+    A smooth, symmetric limiter that is less diffusive than minmod and less
+    compressive than superbee, making it a good general-purpose choice.
+    """
+    abs_r = np.abs(r)
+    return (r + abs_r) / (1.0 + abs_r)
+
+
+def _phi_mc(r):
+    """Monotonized Central (MC) flux-limiter function.
+
+    φ(r) = max(0, min((1+r)/2, 2, 2r))
+
+    The MC limiter is the least diffusive symmetric TVD limiter; it recovers
+    second-order accuracy on smooth profiles while still damping oscillations
+    near discontinuities.
+    """
+    return np.maximum(0.0, np.minimum(np.minimum(0.5 * (1.0 + r), 2.0), 2.0 * r))
+
+
 def tvd_limiter_2d(u, EToE, mean_weights, phi_fn):
     """Apply a TVD slope limiter to a 2D DG field.
 
@@ -319,8 +341,10 @@ def simulate_advection_2d(
     _TVD_PHI = {
         "minmod": _phi_minmod,
         "superbee": _phi_superbee,
+        "van_leer": _phi_van_leer,
+        "mc": _phi_mc,
     }
-    _SUPPORTED = (None, "bound_preserving", "minmod", "superbee")
+    _SUPPORTED = (None, "bound_preserving", "minmod", "superbee", "van_leer", "mc")
 
     if limiter_type is None:
         mean_weights = None

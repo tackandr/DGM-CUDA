@@ -291,3 +291,110 @@ def test_superbee_less_diffusive_than_minmod_for_circle():
         f"Superbee L1 {l1_sb:.5f} should be smaller than minmod L1 {l1_mm:.5f}"
     )
 
+
+def test_van_leer_limiter_bounds_circle():
+    """Van Leer TVD limiter should keep the solution in [0, 1] for a circle IC."""
+    N = 2
+    nx, ny = 24, 24
+    t_final = 0.3
+    ax, ay = 1.0, 0.5
+    x0, y0, radius = 0.35, 0.45, 0.15
+    # Van Leer is a smooth TVD limiter; tiny excursions ~O(h^2) are acceptable.
+    physical_tol = 1e-4
+
+    def u_init(x, y):
+        return (((x - x0) ** 2 + (y - y0) ** 2) <= radius**2).astype(float)
+
+    data, u, _ = simulate_advection_2d(
+        N=N, nx=nx, ny=ny, t_final=t_final,
+        ax=ax, ay=ay, cfl=0.1, periodic=True,
+        u_init=u_init, limiter_type="van_leer",
+    )
+
+    assert np.min(u) >= -physical_tol, f"Van Leer undershoot: {np.min(u):.4f}"
+    assert np.max(u) <= 1.0 + physical_tol, f"Van Leer overshoot: {np.max(u):.4f}"
+    assert np.max(u) >= 0.8, "Van Leer excessively diffused circle peak"
+
+    initial_mass = np.mean(u_init(data["x"], data["y"]))
+    assert abs(np.mean(u) - initial_mass) < 5e-4, "Van Leer mass not conserved"
+
+
+def test_mc_limiter_bounds_circle():
+    """Monotonized Central limiter should keep the solution in [0, 1] for a circle IC."""
+    N = 2
+    nx, ny = 24, 24
+    t_final = 0.3
+    ax, ay = 1.0, 0.5
+    x0, y0, radius = 0.35, 0.45, 0.15
+    # MC is a smooth TVD limiter; tiny excursions ~O(h^2) are acceptable.
+    physical_tol = 1e-4
+
+    def u_init(x, y):
+        return (((x - x0) ** 2 + (y - y0) ** 2) <= radius**2).astype(float)
+
+    data, u, _ = simulate_advection_2d(
+        N=N, nx=nx, ny=ny, t_final=t_final,
+        ax=ax, ay=ay, cfl=0.1, periodic=True,
+        u_init=u_init, limiter_type="mc",
+    )
+
+    assert np.min(u) >= -physical_tol, f"MC undershoot: {np.min(u):.4f}"
+    assert np.max(u) <= 1.0 + physical_tol, f"MC overshoot: {np.max(u):.4f}"
+    assert np.max(u) >= 0.8, "MC excessively diffused circle peak"
+
+    initial_mass = np.mean(u_init(data["x"], data["y"]))
+    assert abs(np.mean(u) - initial_mass) < 5e-4, "MC mass not conserved"
+
+
+def test_van_leer_less_diffusive_than_minmod():
+    """Van Leer should preserve more peak than minmod on a smooth sine wave."""
+    N = 2
+    nx, ny = 8, 8
+    t_final = 1.0
+    ax, ay = 1.0, 0.0
+
+    def u_init(x, y):
+        return np.sin(2 * np.pi * x)
+
+    common = dict(
+        N=N, nx=nx, ny=ny, t_final=t_final,
+        ax=ax, ay=ay, cfl=0.1, periodic=True, u_init=u_init,
+    )
+
+    data_mm, u_mm, _ = simulate_advection_2d(**common, limiter_type="minmod")
+    data_vl, u_vl, _ = simulate_advection_2d(**common, limiter_type="van_leer")
+
+    # Van Leer is less diffusive: its L2 error against the exact solution (period-1
+    # advection, so u_exact = u_init after t=1) should be no larger than minmod's.
+    u_exact = u_init(data_mm["x"], data_mm["y"])
+    l2_mm = np.sqrt(np.mean((u_mm - u_exact) ** 2))
+    l2_vl = np.sqrt(np.mean((u_vl - u_exact) ** 2))
+    assert l2_vl <= l2_mm, (
+        f"Van Leer L2 {l2_vl:.5f} should be <= minmod L2 {l2_mm:.5f}"
+    )
+
+
+def test_mc_less_diffusive_than_minmod():
+    """MC limiter should preserve more peak than minmod on a smooth sine wave."""
+    N = 2
+    nx, ny = 8, 8
+    t_final = 1.0
+    ax, ay = 1.0, 0.0
+
+    def u_init(x, y):
+        return np.sin(2 * np.pi * x)
+
+    common = dict(
+        N=N, nx=nx, ny=ny, t_final=t_final,
+        ax=ax, ay=ay, cfl=0.1, periodic=True, u_init=u_init,
+    )
+
+    data_mm, u_mm, _ = simulate_advection_2d(**common, limiter_type="minmod")
+    data_mc, u_mc, _ = simulate_advection_2d(**common, limiter_type="mc")
+
+    u_exact = u_init(data_mm["x"], data_mm["y"])
+    l2_mm = np.sqrt(np.mean((u_mm - u_exact) ** 2))
+    l2_mc = np.sqrt(np.mean((u_mc - u_exact) ** 2))
+    assert l2_mc <= l2_mm, (
+        f"MC L2 {l2_mc:.5f} should be <= minmod L2 {l2_mm:.5f}"
+    )
