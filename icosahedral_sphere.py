@@ -14,6 +14,8 @@ simulate_scalar_advection_sphere -- SSP-RK3 scalar transport driver
 
 import numpy as np
 
+from dgm2d import simplex_nodes_2d
+
 _FACE_VERTEX_IDS = ((0, 1), (1, 2), (2, 0))
 
 
@@ -170,12 +172,22 @@ def _great_circle_point(a, b, tau):
     return point / np.linalg.norm(point), alpha
 
 
-def build_sphere_geometry(vertices, faces, quadrature_order=6):
+def _reference_simplex_barycentric(order):
+    r, s = simplex_nodes_2d(int(order))
+    l1 = 0.5 * (r + 1.0)
+    l2 = 0.5 * (s + 1.0)
+    l0 = 1.0 - l1 - l2
+    return np.stack((l0, l1, l2), axis=1)
+
+
+def build_sphere_geometry(vertices, faces, quadrature_order=6, simplex_order=1):
     """Return geometry and edge-integrated metric data for spherical triangles."""
     vertices = np.asarray(vertices, dtype=float)
     faces = np.asarray(faces, dtype=int)
     if quadrature_order < 2:
         raise ValueError("quadrature_order must be at least 2")
+    if simplex_order < 1:
+        raise ValueError("simplex_order must be at least 1")
 
     radii = np.linalg.norm(vertices, axis=1)
     radius = float(np.mean(radii))
@@ -191,10 +203,13 @@ def build_sphere_geometry(vertices, faces, quadrature_order=6):
     edge_midpoints = np.empty((K, 3, 3), dtype=float)
     edge_normals = np.empty((K, 3, 3), dtype=float)
     edge_lengths = np.empty((K, 3), dtype=float)
+    simplex_bary = _reference_simplex_barycentric(simplex_order)
 
     for k, face in enumerate(faces):
         tri = unit_vertices[face]
-        center = tri.sum(axis=0)
+        simplex_pts = simplex_bary @ tri
+        simplex_pts = simplex_pts / np.linalg.norm(simplex_pts, axis=1, keepdims=True)
+        center = simplex_pts.mean(axis=0)
         center = center / np.linalg.norm(center)
         centers[k] = radius * center
         areas[k] = radius**2 * _spherical_triangle_area_unit(tri[0], tri[1], tri[2])
@@ -318,10 +333,16 @@ def simulate_scalar_advection_sphere(
     radius=1.0,
     q_init=None,
     quadrature_order=6,
+    simplex_order=1,
 ):
     """Advect a cell-average scalar on a refined spherical icosahedral mesh."""
     vertices, faces = build_icosahedral_sphere_mesh(refinement_level=refinement_level, radius=radius)
-    geometry = build_sphere_geometry(vertices, faces, quadrature_order=quadrature_order)
+    geometry = build_sphere_geometry(
+        vertices,
+        faces,
+        quadrature_order=quadrature_order,
+        simplex_order=simplex_order,
+    )
     edge_flux = build_edge_flux_integrals(
         geometry,
         lambda p: constant_eastward_wind(p, speed=speed),
