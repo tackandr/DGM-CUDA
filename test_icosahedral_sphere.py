@@ -29,6 +29,14 @@ def test_constant_state_rhs_is_nearly_zero_for_eastward_flow():
     np.testing.assert_allclose(rhs, 0.0, atol=5e-8)
 
 
+def test_geometry_supports_higher_order_simplex_nodes():
+    vertices, faces = build_icosahedral_sphere_mesh(refinement_level=1, radius=1.0)
+    geometry = build_sphere_geometry(vertices, faces, quadrature_order=6, simplex_order=3)
+
+    assert geometry["centers"].shape == (faces.shape[0], 3)
+    np.testing.assert_allclose(np.linalg.norm(geometry["centers"], axis=1), 1.0, atol=1e-12)
+
+
 def test_scalar_gaussian_advects_eastward_on_one_refinement_level():
     width = 0.35
     speed = 1.0
@@ -72,3 +80,19 @@ def test_scalar_gaussian_advects_eastward_on_one_refinement_level():
     assert np.max(q) <= np.max(q0) + 1e-12
     assert l2_err < 0.08
     assert lon1 > lon0 + 0.05
+
+
+def test_simulation_accepts_higher_order_simplex_nodes():
+    geometry, q, t = simulate_scalar_advection_sphere(
+        refinement_level=1,
+        t_final=0.02,
+        speed=1.0,
+        cfl=0.25,
+        radius=1.0,
+        quadrature_order=6,
+        simplex_order=3,
+    )
+
+    assert t > 0.0
+    assert q.shape == (geometry["faces"].shape[0],)
+    np.testing.assert_allclose(np.linalg.norm(geometry["centers"], axis=1), 1.0, atol=1e-12)
