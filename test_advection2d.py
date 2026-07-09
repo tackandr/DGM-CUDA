@@ -1,0 +1,400 @@
+"""Tests for the 2D DG linear advection solver."""
+
+import numpy as np
+
+from advection2d import advection_rhs, simulate_advection_2d
+from mesh2d import setup_2d
+
+
+def _rhs_with_data(u, data, ax=1.0, ay=0.4, bc_type="periodic", flux_type="upwind"):
+    return advection_rhs(
+        u,
+        ax,
+        ay,
+        data["Dr"],
+        data["Ds"],
+        data["LIFT"],
+        data["rx"],
+        data["sx"],
+        data["ry"],
+        data["sy"],
+        data["J"],
+        data["nx"],
+        data["ny"],
+        data["Fscale"],
+        data["EToE"],
+        data["EToF"],
+        data["fmask"],
+        bc_type=bc_type,
+        flux_type=flux_type,
+        boundary_mask=data.get("boundary_mask"),
+    )
+
+
+def test_constant_solution_has_zero_rhs_periodic():
+    data = setup_2d(N=2, nx=4, ny=3, periodic=True)
+    u = np.full_like(data["x"], 2.5)
+    rhs = _rhs_with_data(u, data, ax=0.7, ay=-0.2, bc_type="periodic")
+    np.testing.assert_allclose(rhs, 0.0, atol=1e-12)
+
+
+def test_constant_solution_has_zero_rhs_transmissive():
+    data = setup_2d(N=2, nx=4, ny=3, periodic=False)
+    u = np.full_like(data["x"], -1.0)
+    rhs = _rhs_with_data(u, data, ax=1.1, ay=0.3, bc_type="transmissive")
+    np.testing.assert_allclose(rhs, 0.0, atol=1e-12)
+
+
+def test_simulate_returns_expected_shapes_and_time():
+    N = 2
+    nx, ny = 4, 3
+    tfinal = 0.05
+    data, u, t = simulate_advection_2d(N=N, nx=nx, ny=ny, t_final=tfinal, periodic=True)
+
+    K = 2 * nx * ny
+    Np = (N + 1) * (N + 2) // 2
+    assert u.shape == (K, Np)
+    assert data["x"].shape == (K, Np)
+    assert t == tfinal
+
+
+def test_x_only_advection_stable():
+    """X-only advection (ax=1, ay=0) with periodic IC should stay bounded at t=0.5.
+
+    After t=0.5 the sine wave should have shifted half a period, so the
+    solution should be close to the *negative* of the initial condition
+    (sin(2π(x-0.5)) = -sin(2πx)).  This test isolates any instability that
+    arises purely from x-direction advection.
+    """
+    N = 2
+    nx, ny = 4, 4
+    t_final = 0.5
+
+    def u_init(x, y):
+        return np.sin(2 * np.pi * x)
+
+    data, u, t = simulate_advection_2d(
+        N=N, nx=nx, ny=ny, t_final=t_final, ax=1.0, ay=0.0,
+        cfl=0.1, periodic=True, u_init=u_init,
+    )
+    u_exact = -np.sin(2 * np.pi * data["x"])
+
+    l2_init = np.sqrt(np.mean(u_init(data["x"], data["y"]) ** 2))
+    l2_err = np.sqrt(np.mean((u - u_exact) ** 2))
+    # Solution should not blow up: error relative to the initial norm < 1
+    assert l2_err / l2_init < 1.0, (
+        f"x-only advection unstable: relative L2 error = {l2_err/l2_init:.3f}"
+    )
+
+
+def test_y_only_advection_stable():
+    """Y-only advection (ax=0, ay=1) with periodic IC should stay bounded at t=0.5.
+
+    After t=0.5 the sine wave should have shifted half a period, so the
+    solution should be close to the *negative* of the initial condition
+    (sin(2π(y-0.5)) = -sin(2πy)).  This test isolates any instability that
+    arises purely from y-direction advection.
+    """
+    N = 2
+    nx, ny = 4, 4
+    t_final = 0.5
+
+    def u_init(x, y):
+        return np.sin(2 * np.pi * y)
+
+    data, u, t = simulate_advection_2d(
+        N=N, nx=nx, ny=ny, t_final=t_final, ax=0.0, ay=1.0,
+        cfl=0.1, periodic=True, u_init=u_init,
+    )
+    u_exact = -np.sin(2 * np.pi * data["y"])
+
+    l2_init = np.sqrt(np.mean(np.sin(2 * np.pi * data["y"]) ** 2))
+    l2_err = np.sqrt(np.mean((u - u_exact) ** 2))
+    # Solution should not blow up: error relative to the initial norm < 1
+    assert l2_err / l2_init < 1.0, (
+        f"y-only advection unstable: relative L2 error = {l2_err/l2_init:.3f}"
+    )
+
+
+def test_x_only_advection_central_flux_bounded():
+    N = 2
+    nx, ny = 4, 4
+    t_final = 0.5
+
+    def u_init(x, y):
+        return np.sin(2 * np.pi * x)
+
+    data, u, t = simulate_advection_2d(
+        N=N, nx=nx, ny=ny, t_final=t_final, ax=1.0, ay=0.0,
+        cfl=0.1, periodic=True, u_init=u_init, flux_type="central",
+    )
+    x0 = data["VX"].min()
+    Lx = data["VX"].max() - x0
+    x_shift = ((data["x"] - t_final) - x0) % Lx + x0
+    u_exact = u_init(x_shift, data["y"])
+
+    l2_init = np.sqrt(np.mean(np.sin(2 * np.pi * data["x"]) ** 2))
+    l2_err = np.sqrt(np.mean((u - u_exact) ** 2))
+    assert l2_err / l2_init < 0.5, (
+        f"x-only central advection unstable: relative L2 error = {l2_err/l2_init:.3f}"
+    )
+    assert np.max(np.abs(u)) < 1.2
+
+
+def test_semidiscrete_rhs_error_reduces_with_refinement():
+    N = 2
+    ax, ay = 0.7, 0.4
+
+    def u_fn(x, y):
+        return np.sin(np.pi * x) * np.sin(np.pi * y)
+
+    def rhs_exact(x, y):
+        ux = np.pi * np.cos(np.pi * x) * np.sin(np.pi * y)
+        uy = np.pi * np.sin(np.pi * x) * np.cos(np.pi * y)
+        return -(ax * ux + ay * uy)
+
+    errs = []
+    for nx, ny in [(4, 4), (8, 8)]:
+        data = setup_2d(N=N, nx=nx, ny=ny, periodic=False)
+        u = u_fn(data["x"], data["y"])
+        rhs = _rhs_with_data(u, data, ax=ax, ay=ay, bc_type="transmissive")
+        err = np.sqrt(np.mean((rhs - rhs_exact(data["x"], data["y"])) ** 2))
+        errs.append(err)
+
+    assert errs[1] < errs[0]
+
+
+def test_bound_preserving_limiter_suppresses_circle_edge_oscillations():
+    N = 2
+    nx, ny = 24, 24
+    t_final = 0.3
+    ax, ay = 1.0, 0.5
+
+    x0, y0 = 0.35, 0.45
+    radius = 0.15
+    oscillation_tol = 0.05
+    physical_tol = 1e-6
+
+    def u_init(x, y):
+        return (((x - x0) ** 2 + (y - y0) ** 2) <= radius**2).astype(float)
+
+    _, u_unlimited, _ = simulate_advection_2d(
+        N=N,
+        nx=nx,
+        ny=ny,
+        t_final=t_final,
+        ax=ax,
+        ay=ay,
+        cfl=0.1,
+        periodic=True,
+        u_init=u_init,
+        limiter_type=None,
+    )
+    data, u_limited, _ = simulate_advection_2d(
+        N=N,
+        nx=nx,
+        ny=ny,
+        t_final=t_final,
+        ax=ax,
+        ay=ay,
+        cfl=0.1,
+        periodic=True,
+        u_init=u_init,
+        limiter_type="bound_preserving",
+    )
+
+    assert (np.min(u_unlimited) < -oscillation_tol) or (np.max(u_unlimited) > 1.0 + oscillation_tol)
+    assert np.min(u_limited) >= -physical_tol
+    assert np.max(u_limited) <= 1.0 + physical_tol
+    assert np.max(u_limited) >= 0.8
+
+    initial_mass = np.mean(u_init(data["x"], data["y"]))
+    limited_mass = np.mean(u_limited)
+    assert abs(limited_mass - initial_mass) < 5e-4
+
+
+def test_minmod_limiter_suppresses_circle_edge_oscillations():
+    """Minmod TVD limiter should bound the solution in [0, 1] for a circle IC.
+
+    The minmod phi function scales nodal deviations so they do not exceed the
+    maximum inter-cell average difference, ensuring no under- or overshoots.
+    """
+    N = 2
+    nx, ny = 24, 24
+    t_final = 0.3
+    ax, ay = 1.0, 0.5
+    x0, y0, radius = 0.35, 0.45, 0.15
+    physical_tol = 1e-6
+
+    def u_init(x, y):
+        return (((x - x0) ** 2 + (y - y0) ** 2) <= radius**2).astype(float)
+
+    data, u, t = simulate_advection_2d(
+        N=N,
+        nx=nx,
+        ny=ny,
+        t_final=t_final,
+        ax=ax,
+        ay=ay,
+        cfl=0.1,
+        periodic=True,
+        u_init=u_init,
+        limiter_type="minmod",
+    )
+
+    assert np.min(u) >= -physical_tol, f"Minmod undershoot: {np.min(u):.4f}"
+    assert np.max(u) <= 1.0 + physical_tol, f"Minmod overshoot: {np.max(u):.4f}"
+    assert np.max(u) >= 0.8, "Minmod excessively diffused circle peak"
+
+    initial_mass = np.mean(u_init(data["x"], data["y"]))
+    assert abs(np.mean(u) - initial_mass) < 5e-4, "Minmod mass not conserved"
+
+
+def test_superbee_less_diffusive_than_minmod_for_circle():
+    """Superbee TVD limiter should be less diffusive than minmod on a circle IC.
+
+    Superbee's phi function allows deviations up to twice the inter-cell
+    difference before activating, so it preserves more of the peak value and
+    gives a lower L1 error against the exact advected circle.
+    """
+    N = 2
+    nx, ny = 24, 24
+    t_final = 0.3
+    ax, ay = 1.0, 0.5
+    x0, y0, radius = 0.35, 0.45, 0.15
+
+    def u_init(x, y):
+        return (((x - x0) ** 2 + (y - y0) ** 2) <= radius**2).astype(float)
+
+    def circle_exact(x, y, t):
+        xs = ((x - ax * t) % 1.0)
+        ys = ((y - ay * t) % 1.0)
+        return (((xs - x0) ** 2 + (ys - y0) ** 2) <= radius**2).astype(float)
+
+    common = dict(
+        N=N, nx=nx, ny=ny, t_final=t_final,
+        ax=ax, ay=ay, cfl=0.1, periodic=True, u_init=u_init,
+    )
+
+    data_mm, u_mm, t_mm = simulate_advection_2d(**common, limiter_type="minmod")
+    data_sb, u_sb, t_sb = simulate_advection_2d(**common, limiter_type="superbee")
+
+    uex_mm = circle_exact(data_mm["x"], data_mm["y"], t_mm)
+    uex_sb = circle_exact(data_sb["x"], data_sb["y"], t_sb)
+    l1_mm = np.mean(np.abs(u_mm - uex_mm))
+    l1_sb = np.mean(np.abs(u_sb - uex_sb))
+
+    assert np.max(u_sb) > np.max(u_mm), (
+        f"Superbee peak {np.max(u_sb):.4f} should exceed minmod peak {np.max(u_mm):.4f}"
+    )
+    assert l1_sb < l1_mm, (
+        f"Superbee L1 {l1_sb:.5f} should be smaller than minmod L1 {l1_mm:.5f}"
+    )
+
+
+def test_van_leer_limiter_bounds_circle():
+    """Van Leer TVD limiter should keep the solution in [0, 1] for a circle IC."""
+    N = 2
+    nx, ny = 24, 24
+    t_final = 0.3
+    ax, ay = 1.0, 0.5
+    x0, y0, radius = 0.35, 0.45, 0.15
+    # Van Leer is a smooth TVD limiter; tiny excursions ~O(h^2) are acceptable.
+    physical_tol = 1e-4
+
+    def u_init(x, y):
+        return (((x - x0) ** 2 + (y - y0) ** 2) <= radius**2).astype(float)
+
+    data, u, _ = simulate_advection_2d(
+        N=N, nx=nx, ny=ny, t_final=t_final,
+        ax=ax, ay=ay, cfl=0.1, periodic=True,
+        u_init=u_init, limiter_type="van_leer",
+    )
+
+    assert np.min(u) >= -physical_tol, f"Van Leer undershoot: {np.min(u):.4f}"
+    assert np.max(u) <= 1.0 + physical_tol, f"Van Leer overshoot: {np.max(u):.4f}"
+    assert np.max(u) >= 0.8, "Van Leer excessively diffused circle peak"
+
+    initial_mass = np.mean(u_init(data["x"], data["y"]))
+    assert abs(np.mean(u) - initial_mass) < 5e-4, "Van Leer mass not conserved"
+
+
+def test_mc_limiter_bounds_circle():
+    """Monotonized Central limiter should keep the solution in [0, 1] for a circle IC."""
+    N = 2
+    nx, ny = 24, 24
+    t_final = 0.3
+    ax, ay = 1.0, 0.5
+    x0, y0, radius = 0.35, 0.45, 0.15
+    # MC is a smooth TVD limiter; tiny excursions ~O(h^2) are acceptable.
+    physical_tol = 1e-4
+
+    def u_init(x, y):
+        return (((x - x0) ** 2 + (y - y0) ** 2) <= radius**2).astype(float)
+
+    data, u, _ = simulate_advection_2d(
+        N=N, nx=nx, ny=ny, t_final=t_final,
+        ax=ax, ay=ay, cfl=0.1, periodic=True,
+        u_init=u_init, limiter_type="mc",
+    )
+
+    assert np.min(u) >= -physical_tol, f"MC undershoot: {np.min(u):.4f}"
+    assert np.max(u) <= 1.0 + physical_tol, f"MC overshoot: {np.max(u):.4f}"
+    assert np.max(u) >= 0.8, "MC excessively diffused circle peak"
+
+    initial_mass = np.mean(u_init(data["x"], data["y"]))
+    assert abs(np.mean(u) - initial_mass) < 5e-4, "MC mass not conserved"
+
+
+def test_van_leer_less_diffusive_than_minmod():
+    """Van Leer should preserve more peak than minmod on a smooth sine wave."""
+    N = 2
+    nx, ny = 8, 8
+    t_final = 1.0
+    ax, ay = 1.0, 0.0
+
+    def u_init(x, y):
+        return np.sin(2 * np.pi * x)
+
+    common = dict(
+        N=N, nx=nx, ny=ny, t_final=t_final,
+        ax=ax, ay=ay, cfl=0.1, periodic=True, u_init=u_init,
+    )
+
+    data_mm, u_mm, _ = simulate_advection_2d(**common, limiter_type="minmod")
+    data_vl, u_vl, _ = simulate_advection_2d(**common, limiter_type="van_leer")
+
+    # Van Leer is less diffusive: its L2 error against the exact solution (period-1
+    # advection, so u_exact = u_init after t=1) should be no larger than minmod's.
+    u_exact = u_init(data_mm["x"], data_mm["y"])
+    l2_mm = np.sqrt(np.mean((u_mm - u_exact) ** 2))
+    l2_vl = np.sqrt(np.mean((u_vl - u_exact) ** 2))
+    assert l2_vl <= l2_mm, (
+        f"Van Leer L2 {l2_vl:.5f} should be <= minmod L2 {l2_mm:.5f}"
+    )
+
+
+def test_mc_less_diffusive_than_minmod():
+    """MC limiter should preserve more peak than minmod on a smooth sine wave."""
+    N = 2
+    nx, ny = 8, 8
+    t_final = 1.0
+    ax, ay = 1.0, 0.0
+
+    def u_init(x, y):
+        return np.sin(2 * np.pi * x)
+
+    common = dict(
+        N=N, nx=nx, ny=ny, t_final=t_final,
+        ax=ax, ay=ay, cfl=0.1, periodic=True, u_init=u_init,
+    )
+
+    data_mm, u_mm, _ = simulate_advection_2d(**common, limiter_type="minmod")
+    data_mc, u_mc, _ = simulate_advection_2d(**common, limiter_type="mc")
+
+    u_exact = u_init(data_mm["x"], data_mm["y"])
+    l2_mm = np.sqrt(np.mean((u_mm - u_exact) ** 2))
+    l2_mc = np.sqrt(np.mean((u_mc - u_exact) ** 2))
+    assert l2_mc <= l2_mm, (
+        f"MC L2 {l2_mc:.5f} should be <= minmod L2 {l2_mm:.5f}"
+    )
