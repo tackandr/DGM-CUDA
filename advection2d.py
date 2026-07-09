@@ -47,6 +47,7 @@ def advection_rhs(
     bc_type="periodic",
     u_bc=None,
     flux_type="upwind",
+    boundary_mask=None,
 ):
     """Return DG residual for 2D linear advection."""
     K, Np = u.shape
@@ -62,6 +63,11 @@ def advection_rhs(
 
     face_flux_term = np.zeros((K, Nfaces * Nfp), dtype=float)
 
+    # Build reversed face-node lookup once: shape (Nfaces, Nfp).
+    # For a shared edge the neighbour indexes its face nodes in opposite order
+    # (CCW convention), so we reverse when gathering the exterior state.
+    fmask_rev = np.array([np.asarray(fmask[ff])[::-1] for ff in range(Nfaces)])
+
     for f in range(Nfaces):
         ids = fmask[f]
         sl = slice(f * Nfp, (f + 1) * Nfp)
@@ -71,22 +77,28 @@ def advection_rhs(
         nyf = ny[:, sl]
         an = ax * nxf + ay * nyf
 
-        uP = np.empty_like(uM)
-        for k in range(K):
-            kn = EToE[k, f]
-            fn = EToF[k, f]
-            if (kn == k and fn == f) and bc_type != "periodic":
+        # Vectorised exterior-state gather over all K elements.
+        kn = EToE[:, f]                        # (K,)  neighbour element indices
+        fn = EToF[:, f]                         # (K,)  neighbour face indices
+        neigh_nodes = fmask_rev[fn]             # (K, Nfp) via fancy index on fn
+        uP = u[kn[:, np.newaxis], neigh_nodes]  # (K, Nfp)
+
+        # Fix up boundary faces separately.
+        if bc_type != "periodic":
+            if boundary_mask is not None:
+                is_bnd = boundary_mask[:, f]
+            else:
+                is_bnd = (kn == np.arange(K)) & (fn == f)
+            bnd_k = np.where(is_bnd)[0]
+            if bnd_k.size > 0:
                 if bc_type == "transmissive":
-                    uP[k] = uM[k]
+                    uP[bnd_k] = uM[bnd_k]
                 elif bc_type == "dirichlet":
                     if u_bc is None:
                         raise ValueError("u_bc must be provided for dirichlet bc")
-                    uP[k] = u_bc[k, ids]
+                    uP[bnd_k] = u_bc[np.ix_(bnd_k, ids)]
                 else:
                     raise ValueError("Unsupported bc_type")
-            else:
-                # Opposite orientation across a shared edge for CCW triangles
-                uP[k] = u[kn, fmask[fn][::-1]]
 
         if flux_type == "upwind":
             flux = upwind_flux(uM, uP, an)
@@ -100,6 +112,7 @@ def advection_rhs(
 
     rhs -= (LIFT @ face_flux_term.T).T
     return rhs
+
 
 
 def rk4_step_advection(u, dt, rhs_fn):
@@ -297,6 +310,7 @@ def simulate_advection_2d(
             data["fmask"],
             bc_type="periodic" if periodic else "transmissive",
             flux_type=flux_type,
+            boundary_mask=data.get("boundary_mask"),
         )
 
     t = 0.0

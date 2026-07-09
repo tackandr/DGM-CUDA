@@ -27,6 +27,7 @@ def _rhs_with_data(u, data, ax=1.0, ay=0.4, bc_type="periodic", flux_type="upwin
         data["fmask"],
         bc_type=bc_type,
         flux_type=flux_type,
+        boundary_mask=data.get("boundary_mask"),
     )
 
 

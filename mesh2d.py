@@ -187,6 +187,20 @@ def build_geometry_2d(VX, VY, EToV, r, s, Dr, Ds, fmask):
     return x, y, rx, sx, ry, sy, J, nx, ny, sJ, Fscale
 
 
+def build_boundary_mask(EToE, EToF):
+    """Return a boolean mask of shape (K, Nfaces) marking boundary faces.
+
+    A face (k, f) is on the boundary when the connectivity is self-referential,
+    i.e. ``EToE[k, f] == k`` and ``EToF[k, f] == f``.  Interior (shared) faces
+    will always point to a *different* neighbour element or face.
+    """
+    K = EToE.shape[0]
+    Nfaces = EToE.shape[1]
+    self_k = np.arange(K)[:, np.newaxis]           # (K, 1)
+    self_f = np.arange(Nfaces)[np.newaxis, :]      # (1, Nfaces)
+    return (EToE == self_k) & (EToF == self_f)
+
+
 def setup_2d(N, nx, ny, x_left=0.0, x_right=1.0, y_bottom=0.0, y_top=1.0, periodic=False):
     """Build a complete 2D DG setup bundle for triangular elements."""
     VX, VY, EToV = build_uniform_tri_mesh(nx, ny, x_left, x_right, y_bottom, y_top)
@@ -195,6 +209,8 @@ def setup_2d(N, nx, ny, x_left=0.0, x_right=1.0, y_bottom=0.0, y_top=1.0, period
 
     r, s, V, Vr, Vs, Dr, Ds, fmask, LIFT = build_operators_2d(N)
     x, y, rx, sx, ry, sy, J, nxv, nyv, sJ, Fscale = build_geometry_2d(VX, VY, EToV, r, s, Dr, Ds, fmask)
+
+    boundary_mask = build_boundary_mask(EToE, EToF)
 
     return {
         "VX": VX,
@@ -222,4 +238,5 @@ def setup_2d(N, nx, ny, x_left=0.0, x_right=1.0, y_bottom=0.0, y_top=1.0, period
         "ny": nyv,
         "sJ": sJ,
         "Fscale": Fscale,
+        "boundary_mask": boundary_mask,
     }
