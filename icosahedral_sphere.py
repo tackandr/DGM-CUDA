@@ -172,7 +172,7 @@ def _great_circle_point(a, b, tau):
     return point / np.linalg.norm(point), alpha
 
 
-def _reference_simplex_barycentric(order):
+def _simplex_nodes_to_barycentric(order):
     r, s = simplex_nodes_2d(int(order))
     l1 = 0.5 * (r + 1.0)
     l2 = 0.5 * (s + 1.0)
@@ -203,7 +203,7 @@ def build_sphere_geometry(vertices, faces, quadrature_order=6, simplex_order=1):
     edge_midpoints = np.empty((K, 3, 3), dtype=float)
     edge_normals = np.empty((K, 3, 3), dtype=float)
     edge_lengths = np.empty((K, 3), dtype=float)
-    simplex_bary = _reference_simplex_barycentric(simplex_order)
+    simplex_bary = _simplex_nodes_to_barycentric(simplex_order)
 
     for k, face in enumerate(faces):
         tri = unit_vertices[face]
