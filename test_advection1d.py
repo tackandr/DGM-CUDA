@@ -69,9 +69,9 @@ class TestUpwindFlux1D:
         an = np.array([1.0, -1.0, 0.0])
         f = _upwind_flux_1d(u_m, u_p, an)
         assert f.shape == (3,)
-        assert f[0] == pytest.approx(1.0 * 1.0)   # a>0 → u_minus
-        assert f[1] == pytest.approx(-1.0 * 3.0)  # a<0 → u_plus
-        assert f[2] == pytest.approx(0.0)          # a=0 → zero
+        assert f[0] == pytest.approx(1.0 * 1.0)   # a>0 -> u_minus
+        assert f[1] == pytest.approx(-1.0 * 3.0)  # a<0 -> u_plus
+        assert f[2] == pytest.approx(0.0)          # a=0 -> zero
 
 
 # ---------------------------------------------------------------------------

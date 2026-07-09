@@ -83,7 +83,7 @@ def _upwind_flux_1d(u_minus, u_plus, an):
     if ``an > 0`` (flow goes right) the left state ``u_minus`` is used; if
     ``an < 0`` the right state ``u_plus`` is used.  Written in the unified form
 
-        F*(u-, u+, a) = ½ [a(u- + u+) - |a|(u+ - u-)]
+        F*(u-, u+, a) = 0.5 * [a*(u- + u+) - |a|*(u+ - u-)]
 
     Parameters
     ----------
