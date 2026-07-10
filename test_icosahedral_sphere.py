@@ -1,5 +1,6 @@
 import numpy as np
 
+from dgm2d import simplex_nodes_2d
 from icosahedral_sphere import (
     build_edge_flux_integrals,
     build_icosahedral_sphere_mesh,
@@ -111,7 +112,7 @@ def test_simulation_accepts_higher_order_simplex_nodes():
 
 
 def test_simulation_accepts_cell_average_q_init_and_broadcasts_to_simplex_nodes():
-    simplex_nodes_per_elem = 3
+    simplex_nodes_per_elem = simplex_nodes_2d(1)[0].size
 
     def q_init(points):
         return np.ones(points.shape[0] // simplex_nodes_per_elem)

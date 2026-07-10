@@ -200,6 +200,7 @@ def build_sphere_geometry(vertices, faces, quadrature_order=6, simplex_order=1):
 
     centers = np.empty((K, 3), dtype=float)
     areas = np.empty(K, dtype=float)
+    # Build once so we can allocate and reuse mapped simplex nodes per element.
     simplex_bary = _simplex_nodes_to_barycentric(simplex_order)
     simplex_points = np.empty((K, simplex_bary.shape[0], 3), dtype=float)
     edge_midpoints = np.empty((K, 3, 3), dtype=float)
@@ -367,7 +368,7 @@ def simulate_scalar_advection_sphere(
         q = np.repeat(q_raw[:, np.newaxis], Np, axis=1)
     else:
         raise ValueError(
-            "q_init must return shape (K*Np,), (K,Np), or (K,) for K elements and Np simplex nodes"
+            "q_init must return shape (K*Np,), (K, Np), or (K,) for K elements and Np simplex nodes"
         )
 
     def rhs(v):
