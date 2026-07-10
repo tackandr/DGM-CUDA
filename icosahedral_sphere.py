@@ -198,17 +198,19 @@ def build_sphere_geometry(vertices, faces, quadrature_order=6, simplex_order=1):
     EToE, EToF = build_sphere_connectivity(faces)
     K = faces.shape[0]
 
+    simplex_bary = _simplex_nodes_to_barycentric(simplex_order)
     centers = np.empty((K, 3), dtype=float)
     areas = np.empty(K, dtype=float)
+    simplex_points = np.empty((K, simplex_bary.shape[0], 3), dtype=float)
     edge_midpoints = np.empty((K, 3, 3), dtype=float)
     edge_normals = np.empty((K, 3, 3), dtype=float)
     edge_lengths = np.empty((K, 3), dtype=float)
-    simplex_bary = _simplex_nodes_to_barycentric(simplex_order)
 
     for k, face in enumerate(faces):
         tri = unit_vertices[face]
         simplex_pts = simplex_bary @ tri
         simplex_pts = simplex_pts / np.linalg.norm(simplex_pts, axis=1, keepdims=True)
+        simplex_points[k] = radius * simplex_pts
         center = simplex_pts.mean(axis=0)
         center = center / np.linalg.norm(center)
         centers[k] = radius * center
@@ -238,6 +240,7 @@ def build_sphere_geometry(vertices, faces, quadrature_order=6, simplex_order=1):
         "radius": radius,
         "centers": centers,
         "areas": areas,
+        "simplex_points": simplex_points,
         "edge_midpoints": edge_midpoints,
         "edge_normals": edge_normals,
         "edge_lengths": edge_lengths,
@@ -306,9 +309,10 @@ def scalar_advection_rhs_sphere(q, areas, edge_flux, EToE):
     """Return a first-order upwind FV residual for scalar advection on the sphere."""
     q = np.asarray(q, dtype=float)
     rhs = np.zeros_like(q)
+    K = q.shape[0]
 
-    for k in range(q.size):
-        flux_sum = 0.0
+    for k in range(K):
+        flux_sum = np.zeros_like(q[k])
         for f in range(3):
             kn = EToE[k, f]
             flux = edge_flux[k, f]
@@ -335,7 +339,7 @@ def simulate_scalar_advection_sphere(
     quadrature_order=6,
     simplex_order=1,
 ):
-    """Advect a cell-average scalar on a refined spherical icosahedral mesh."""
+    """Advect a scalar represented on simplex nodes of each spherical triangle."""
     vertices, faces = build_icosahedral_sphere_mesh(refinement_level=refinement_level, radius=radius)
     geometry = build_sphere_geometry(
         vertices,
@@ -349,13 +353,22 @@ def simulate_scalar_advection_sphere(
         quadrature_order=quadrature_order,
     )
 
-    centers = geometry["centers"]
+    simplex_points = geometry["simplex_points"]
     if q_init is None:
         q_init = lambda pts: np.exp(-((pts[:, 0] - 1.0) ** 2 + pts[:, 1] ** 2 + pts[:, 2] ** 2) / 0.15)
 
-    q = np.asarray(q_init(centers), dtype=float)
-    if q.shape != (faces.shape[0],):
-        raise ValueError("q_init must return a one-dimensional array of cell averages")
+    K, Np = simplex_points.shape[0], simplex_points.shape[1]
+    q_raw = np.asarray(q_init(simplex_points.reshape(K * Np, 3)), dtype=float)
+    if q_raw.shape == (K, Np):
+        q = q_raw
+    elif q_raw.shape == (K * Np,):
+        q = q_raw.reshape(K, Np)
+    elif q_raw.shape == (K,):
+        q = np.repeat(q_raw[:, np.newaxis], Np, axis=1)
+    else:
+        raise ValueError(
+            "q_init must return shape (K*Np,), (K,Np), or (K,) for K elements and Np simplex nodes"
+        )
 
     def rhs(v):
         return scalar_advection_rhs_sphere(v, geometry["areas"], edge_flux, geometry["EToE"])

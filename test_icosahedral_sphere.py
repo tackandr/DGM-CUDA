@@ -35,6 +35,8 @@ def test_geometry_supports_higher_order_simplex_nodes():
 
     assert geometry["centers"].shape == (faces.shape[0], 3)
     np.testing.assert_allclose(np.linalg.norm(geometry["centers"], axis=1), 1.0, atol=1e-12)
+    assert geometry["simplex_points"].shape == (faces.shape[0], 10, 3)
+    np.testing.assert_allclose(np.linalg.norm(geometry["simplex_points"], axis=2), 1.0, atol=1e-12)
 
 
 def test_scalar_gaussian_advects_eastward_on_one_refinement_level():
@@ -60,20 +62,30 @@ def test_scalar_gaussian_advects_eastward_on_one_refinement_level():
         quadrature_order=6,
     )
 
-    centers = geometry["centers"]
-    lon = np.arctan2(centers[:, 1], centers[:, 0])
-    lat = np.arcsin(centers[:, 2] / np.linalg.norm(centers, axis=1))
+    simplex_points = geometry["simplex_points"]
+    lon = np.arctan2(simplex_points[:, :, 1], simplex_points[:, :, 0])
+    lat = np.arcsin(simplex_points[:, :, 2] / np.linalg.norm(simplex_points, axis=2))
     angular_displacement = speed * t / np.maximum(np.cos(lat), 1e-12)
     lon_back = ((lon - angular_displacement + np.pi) % (2.0 * np.pi)) - np.pi
     q_exact = gaussian_from_lonlat(lon_back, lat)
-    q0 = q_init(centers)
+    q0 = q_init(simplex_points.reshape(-1, 3)).reshape(q.shape)
+    q_cell = np.mean(q, axis=1)
+    q0_cell = np.mean(q0, axis=1)
+    q_exact_cell = np.mean(q_exact, axis=1)
+    centers = geometry["centers"]
 
-    initial_mass = np.sum(q0 * geometry["areas"])
-    final_mass = np.sum(q * geometry["areas"])
-    l2_err = np.sqrt(np.mean((q - q_exact) ** 2))
+    initial_mass = np.sum(q0_cell * geometry["areas"])
+    final_mass = np.sum(q_cell * geometry["areas"])
+    l2_err = np.sqrt(np.mean((q_cell - q_exact_cell) ** 2))
 
-    lon0 = np.arctan2(np.sum(q0 * geometry["areas"] * centers[:, 1]), np.sum(q0 * geometry["areas"] * centers[:, 0]))
-    lon1 = np.arctan2(np.sum(q * geometry["areas"] * centers[:, 1]), np.sum(q * geometry["areas"] * centers[:, 0]))
+    lon0 = np.arctan2(
+        np.sum(q0_cell * geometry["areas"] * centers[:, 1]),
+        np.sum(q0_cell * geometry["areas"] * centers[:, 0]),
+    )
+    lon1 = np.arctan2(
+        np.sum(q_cell * geometry["areas"] * centers[:, 1]),
+        np.sum(q_cell * geometry["areas"] * centers[:, 0]),
+    )
 
     assert abs(final_mass - initial_mass) < 1e-12
     assert np.min(q) >= -1e-12
@@ -94,5 +106,21 @@ def test_simulation_accepts_higher_order_simplex_nodes():
     )
 
     assert t > 0.0
-    assert q.shape == (geometry["faces"].shape[0],)
+    assert q.shape == (geometry["faces"].shape[0], geometry["simplex_points"].shape[1])
     np.testing.assert_allclose(np.linalg.norm(geometry["centers"], axis=1), 1.0, atol=1e-12)
+
+
+def test_simulation_accepts_cell_average_q_init_and_broadcasts_to_simplex_nodes():
+    def q_init(points):
+        return np.ones(points.shape[0] // 3)
+
+    geometry, q, _ = simulate_scalar_advection_sphere(
+        refinement_level=0,
+        t_final=0.01,
+        simplex_order=1,
+        q_init=q_init,
+    )
+
+    assert q.shape[0] == geometry["faces"].shape[0]
+    np.testing.assert_allclose(q[:, 0], q[:, 1])
+    np.testing.assert_allclose(q[:, 1], q[:, 2])
