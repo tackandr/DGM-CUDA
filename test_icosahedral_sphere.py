@@ -111,8 +111,10 @@ def test_simulation_accepts_higher_order_simplex_nodes():
 
 
 def test_simulation_accepts_cell_average_q_init_and_broadcasts_to_simplex_nodes():
+    simplex_nodes_per_elem = 3
+
     def q_init(points):
-        return np.ones(points.shape[0] // 3)
+        return np.ones(points.shape[0] // simplex_nodes_per_elem)
 
     geometry, q, _ = simulate_scalar_advection_sphere(
         refinement_level=0,

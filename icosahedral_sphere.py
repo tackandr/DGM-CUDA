@@ -198,9 +198,9 @@ def build_sphere_geometry(vertices, faces, quadrature_order=6, simplex_order=1):
     EToE, EToF = build_sphere_connectivity(faces)
     K = faces.shape[0]
 
-    simplex_bary = _simplex_nodes_to_barycentric(simplex_order)
     centers = np.empty((K, 3), dtype=float)
     areas = np.empty(K, dtype=float)
+    simplex_bary = _simplex_nodes_to_barycentric(simplex_order)
     simplex_points = np.empty((K, simplex_bary.shape[0], 3), dtype=float)
     edge_midpoints = np.empty((K, 3, 3), dtype=float)
     edge_normals = np.empty((K, 3, 3), dtype=float)
