@@ -12,6 +12,8 @@ scalar_advection_rhs_sphere      -- first-order upwind FV RHS on spherical cells
 simulate_scalar_advection_sphere -- SSP-RK3 scalar transport driver
 """
 
+from functools import lru_cache
+
 import numpy as np
 
 from dgm2d import simplex_nodes_2d
@@ -172,6 +174,7 @@ def _great_circle_point(a, b, tau):
     return point / np.linalg.norm(point), alpha
 
 
+@lru_cache(maxsize=16)
 def _simplex_nodes_to_barycentric(order):
     r, s = simplex_nodes_2d(int(order))
     l1 = 0.5 * (r + 1.0)
@@ -318,7 +321,8 @@ def scalar_advection_rhs_sphere(q, areas, edge_flux, EToE):
             kn = EToE[k, f]
             flux = float(edge_flux[k, f])
             q_upwind = q[k] if flux >= 0.0 else q[kn]
-            # Scalar edge flux is applied to each simplex-node value in the element.
+            # Scalar face flux from this FV stencil is applied to each nodal value so
+            # the nodal representation evolves with the same conservative cell fluxes.
             flux_sum += flux * q_upwind
         rhs[k] = -flux_sum / areas[k]
 

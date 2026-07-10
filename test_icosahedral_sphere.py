@@ -112,10 +112,10 @@ def test_simulation_accepts_higher_order_simplex_nodes():
 
 
 def test_simulation_accepts_cell_average_q_init_and_broadcasts_to_simplex_nodes():
-    K = build_icosahedral_sphere_mesh(refinement_level=0, radius=1.0)[1].shape[0]
+    num_elements = build_icosahedral_sphere_mesh(refinement_level=0, radius=1.0)[1].shape[0]
 
     def q_init(points):
-        return np.ones(K)
+        return np.ones(num_elements)
 
     geometry, q, _ = simulate_scalar_advection_sphere(
         refinement_level=0,
