@@ -316,8 +316,9 @@ def scalar_advection_rhs_sphere(q, areas, edge_flux, EToE):
         flux_sum = np.zeros_like(q[k])
         for f in range(3):
             kn = EToE[k, f]
-            flux = edge_flux[k, f]
+            flux = float(edge_flux[k, f])
             q_upwind = q[k] if flux >= 0.0 else q[kn]
+            # Scalar edge flux is applied to each simplex-node value in the element.
             flux_sum += flux * q_upwind
         rhs[k] = -flux_sum / areas[k]
 

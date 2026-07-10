@@ -1,6 +1,5 @@
 import numpy as np
 
-from dgm2d import simplex_nodes_2d
 from icosahedral_sphere import (
     build_edge_flux_integrals,
     build_icosahedral_sphere_mesh,
@@ -69,7 +68,8 @@ def test_scalar_gaussian_advects_eastward_on_one_refinement_level():
     angular_displacement = speed * t / np.maximum(np.cos(lat), 1e-12)
     lon_back = ((lon - angular_displacement + np.pi) % (2.0 * np.pi)) - np.pi
     q_exact = gaussian_from_lonlat(lon_back, lat)
-    q0 = q_init(simplex_points.reshape(-1, 3)).reshape(q.shape)
+    K, Np = q.shape
+    q0 = q_init(simplex_points.reshape(K * Np, 3)).reshape(K, Np)
     q_cell = np.mean(q, axis=1)
     q0_cell = np.mean(q0, axis=1)
     q_exact_cell = np.mean(q_exact, axis=1)
@@ -112,10 +112,10 @@ def test_simulation_accepts_higher_order_simplex_nodes():
 
 
 def test_simulation_accepts_cell_average_q_init_and_broadcasts_to_simplex_nodes():
-    simplex_nodes_per_elem = simplex_nodes_2d(1)[0].size
+    K = build_icosahedral_sphere_mesh(refinement_level=0, radius=1.0)[1].shape[0]
 
     def q_init(points):
-        return np.ones(points.shape[0] // simplex_nodes_per_elem)
+        return np.ones(K)
 
     geometry, q, _ = simulate_scalar_advection_sphere(
         refinement_level=0,
@@ -125,5 +125,6 @@ def test_simulation_accepts_cell_average_q_init_and_broadcasts_to_simplex_nodes(
     )
 
     assert q.shape[0] == geometry["faces"].shape[0]
+    assert q.shape[1] == geometry["simplex_points"].shape[1]
     np.testing.assert_allclose(q[:, 0], q[:, 1])
     np.testing.assert_allclose(q[:, 1], q[:, 2])
