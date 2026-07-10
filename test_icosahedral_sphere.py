@@ -126,5 +126,4 @@ def test_simulation_accepts_cell_average_q_init_and_broadcasts_to_simplex_nodes(
 
     assert q.shape[0] == geometry["faces"].shape[0]
     assert q.shape[1] == geometry["simplex_points"].shape[1]
-    np.testing.assert_allclose(q[:, 0], q[:, 1])
-    np.testing.assert_allclose(q[:, 1], q[:, 2])
+    np.testing.assert_allclose(q, np.repeat(q[:, [0]], q.shape[1], axis=1))
